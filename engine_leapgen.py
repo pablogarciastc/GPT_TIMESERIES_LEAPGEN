@@ -232,7 +232,7 @@ def train_one_epoch_with_aux(
                 aux_loss = -args.pull_constraint_coeff2 * out["reduce_sim2"]
             else:
                 loss -= args.pull_constraint_coeff2 * out["reduce_sim2"]
-                
+
         # --- regularize prompts
         if args.use_e_prompt and task_id > 0:
             l1 = 0.0
@@ -243,18 +243,19 @@ def train_one_epoch_with_aux(
 
         # --- backprop
         optimizer.zero_grad()
-        if args.dualopt: task_optimizer.zero_grad()
+        if args.dualopt:
+            task_optimizer.zero_grad()
 
-        loss.backward()
+        total_loss = loss + aux_loss if aux_loss.requires_grad else loss
+        total_loss.backward()
 
         if args.use_clip_grad:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
 
         optimizer.step()
-        if args.dualopt  and aux_loss.requires_grad:
-            aux_loss.backward()
+        if args.dualopt and aux_loss.requires_grad:
             task_optimizer.step()
-
+            
         # --- metrics
         acc1, acc5 = accuracy(logits, target, topk=(1, 5))
         metric_logger.update(Loss=loss.item(), Lr=optimizer.param_groups[0]["lr"])
