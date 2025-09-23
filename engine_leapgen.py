@@ -173,13 +173,6 @@ def train_one_epoch_with_aux(
 ):
     model.train(set_training_mode)
 
-    # freeze old prompt filters
-    for name, param in model.named_parameters():
-        if "e_prompt" in name and ("v_comp_gen" in name or "k_comp_gen" in name):
-            for i in range(old_num_k):
-                if f".{i}." in name:
-                    param.requires_grad = False
-
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("Lr", utils.SmoothedValue(window_size=1, fmt="{value:.5f}"))
     metric_logger.add_meter("Loss", utils.SmoothedValue(window_size=1, fmt="{value:.3f}"))
@@ -193,21 +186,18 @@ def train_one_epoch_with_aux(
         cls_features = None
         if original_model is not None:
             with torch.no_grad():
-                try:
-                    out0 = original_model(input)
-                    cls_features = out0["pre_logits"].detach().clone()  # break old graph
-                except Exception as e:
-                    print(f"[Warning] original_model forward failed: {e}")
-                    cls_features = None
+                out0 = original_model(input)
+                cls_features = out0["pre_logits"].detach().clone()  # cut graph
 
-        # --- forward pass
+        # --- forward (NO reuse anything across batches)
         out = model.forwardA1(
             input, target, task_id=task_id,
             cls_features=cls_features, train=set_training_mode
         )
+
         logits = out["logits"]["logits"]
 
-        # --- base losses
+        # --- build loss fresh every time
         loss1 = args.intertask_coeff * criterion(logits, target)
 
         known_classes = task_id * len(class_mask[0])
@@ -217,24 +207,23 @@ def train_one_epoch_with_aux(
 
         total_loss = loss1 + loss2
 
-        # --- pull constraints
+        # pull constraints (detach to cut gradient accumulation)
         if args.pull_constraint and "reduce_sim" in out:
-            total_loss -= args.pull_constraint_coeff * out["reduce_sim"]
-
+            total_loss -= args.pull_constraint_coeff * out["reduce_sim"].detach()
         if args.pull_constraint and "reduce_sim2" in out:
-            total_loss -= args.pull_constraint_coeff2 * out["reduce_sim2"]
+            total_loss -= args.pull_constraint_coeff2 * out["reduce_sim2"].detach()
 
-        # --- prompt regularization
+        # regularize prompts
         if args.use_e_prompt and task_id > 0 and old_prompt_matcher is not None:
             l1_loss = sum(
-                torch.norm(o.detach() - n.detach(), p=1)  # detach ambos
+                torch.norm(o.detach() - n, p=1)  # old detached, new still in graph
                 for o, n in zip(old_prompt_matcher.parameters(),
                                 model.e_prompt.prompt_proj.parameters())
             )
             total_loss = total_loss + 0.01 * l1_loss
 
         # --- backward
-        optimizer.zero_grad(set_to_none=True)  # más seguro
+        optimizer.zero_grad(set_to_none=True)
         try:
             total_loss.backward()
         except RuntimeError as e:
@@ -246,11 +235,15 @@ def train_one_epoch_with_aux(
 
         optimizer.step()
 
-        # --- metrics
-        acc1, acc5 = accuracy(logits.detach(), target, topk=(1, 5))
-        metric_logger.update(Loss=total_loss.item(), Lr=optimizer.param_groups[0]["lr"])
-        metric_logger.meters["Acc@1"].update(acc1.item(), n=input.size(0))
-        metric_logger.meters["Acc@5"].update(acc5.item(), n=input.size(0))
+        # --- metrics (detach everything here!)
+        with torch.no_grad():
+            acc1, acc5 = accuracy(logits.detach(), target, topk=(1, 5))
+            metric_logger.update(Loss=total_loss.item(), Lr=optimizer.param_groups[0]["lr"])
+            metric_logger.meters["Acc@1"].update(acc1.item(), n=input.size(0))
+            metric_logger.meters["Acc@5"].update(acc5.item(), n=input.size(0))
+
+        # --- safety: delete references so graph cannot survive
+        del out, logits, loss1, loss2, total_loss
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
