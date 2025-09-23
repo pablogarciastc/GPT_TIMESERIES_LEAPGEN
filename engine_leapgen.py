@@ -225,7 +225,7 @@ def train_one_epoch_with_aux(
 
         optimizer.zero_grad()
         print("ACCEDIENDO AL BACKWARD")
-        loss.backward()
+        loss.backward(retain_graph=True)
         if args.use_clip_grad:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
         optimizer.step()
