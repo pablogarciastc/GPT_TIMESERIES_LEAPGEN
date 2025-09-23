@@ -265,7 +265,7 @@ def evaluate(model, data_loader, device, task_id=-1, class_mask=None, args=None)
     for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
         input, target = input.to(device), target.to(device)
         out = model(input, task_id=task_id)
-        logits = out["logits"]
+        logits = out["logits"]["logits"]
 
         if args.task_inc and class_mask is not None:
             mask = torch.tensor(class_mask[task_id], dtype=torch.int64, device=device)
