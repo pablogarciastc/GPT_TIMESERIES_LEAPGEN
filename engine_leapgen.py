@@ -223,7 +223,7 @@ def train_one_epoch_with_aux(
         loss += criterion(logits[:, known_classes:], cur_targets)
 
         # --- pull constraint
-        aux_loss = torch.tensor(0.0, device=device, requires_grad=True)  # tensor dummy
+        aux_loss = torch.tensor(0.0, device=device)
         if args.pull_constraint and "reduce_sim" in out:
             loss -= args.pull_constraint_coeff * out["reduce_sim"]
 
@@ -255,7 +255,7 @@ def train_one_epoch_with_aux(
         optimizer.step()
         if args.dualopt and aux_loss.requires_grad:
             task_optimizer.step()
-            
+
         # --- metrics
         acc1, acc5 = accuracy(logits, target, topk=(1, 5))
         metric_logger.update(Loss=loss.item(), Lr=optimizer.param_groups[0]["lr"])
