@@ -64,7 +64,6 @@ class LPrompt(nn.Module):
         self.prompt_proj = nn.Linear(embed_dim, embed_dim, bias=False)
 
         # === Generadores de atención ===
-
         self.k_comp_gen = nn.ModuleDict()
         self.v_comp_gen = nn.ModuleDict()
         for i in range(num_layers):
@@ -74,9 +73,8 @@ class LPrompt(nn.Module):
                 self.k_comp_gen[str(i)][str(j)] = nn.ModuleList()
                 self.v_comp_gen[str(i)][str(j)] = nn.ModuleList()
                 for _ in range(top_k_l):
-                    # CORREGIR: usar embed_dim completo, no dividido por heads
-                    k_comp = Gen_Attention2(embed_dim, 1, False, 0.0, 0.0)  # Era: embed_dim // num_heads
-                    v_comp = Gen_Attention2(embed_dim, 1, False, 0.0, 0.0)  # Era: embed_dim // num_heads
+                    k_comp = Gen_Attention2(embed_dim // num_heads, 1, False, 0.0, 0.0)
+                    v_comp = Gen_Attention2(embed_dim // num_heads, 1, False, 0.0, 0.0)
                     self.k_comp_gen[str(i)][str(j)].append(k_comp)
                     self.v_comp_gen[str(i)][str(j)].append(v_comp)
 
@@ -98,56 +96,22 @@ class LPrompt(nn.Module):
         x_inv_norm = torch.rsqrt(torch.clamp(square_sum, min=epsilon))
         return x * x_inv_norm
 
-    def process_new_task(self, old_num_k, new_num_k, aux_desc_emb):
-        print(f"[DEBUG] process_new_task called: old_num_k={old_num_k}, new_num_k={new_num_k}")
-        print(f"[DEBUG] Before update - k_comp_gen structure:")
-        for layer_key in self.k_comp_gen.keys():
-            for head_key in self.k_comp_gen[layer_key].keys():
-                print(
-                    f"[DEBUG]   k_comp_gen[{layer_key}][{head_key}] length: {len(self.k_comp_gen[layer_key][head_key])}")
-
-        # === IMPLEMENTAR LA LÓGICA REAL ===
-
-        # 1. Actualizar tracking variables
+    def process_new_task(self, old_num_k, new_num_k, new_desc_embed):
+        """Actualizar pool de prompts con nuevas descripciones."""
         self.old_num_k = old_num_k
         self.new_num_k = new_num_k
-
-        # 2. Actualizar listas de tracking
         self.kmax_list.append(new_num_k)
-        self.lmax_list.append(new_num_k)
 
-        # 3. Guardar embeddings de descriptores
-        if not hasattr(self, 'desc_embed'):
-            self.desc_embed = aux_desc_emb
-        else:
-            # Concatenar nuevos embeddings
-            self.desc_embed = torch.cat([self.desc_embed, aux_desc_emb], dim=0)
+        # proyectar descriptores de texto → embed_dim
+        self.desc_embed = self.text_proj(new_desc_embed)
 
-        # 4. Expandir generadores de atención si es necesario
-        prompts_needed = new_num_k
-
-        for layer_str in self.k_comp_gen.keys():
-            for head_str in self.k_comp_gen[layer_str].keys():
-                current_size = len(self.k_comp_gen[layer_str][head_str])
-
-                # Añadir nuevos generadores si necesario
-                while current_size < prompts_needed:
-                    head_dim = self.embed_dim // self.num_heads
-                    k_comp = Gen_Attention2(head_dim, 1, False, 0.0, 0.0)
-                    v_comp = Gen_Attention2(head_dim, 1, False, 0.0, 0.0)
-
-                    self.k_comp_gen[layer_str][head_str].append(k_comp)
-                    self.v_comp_gen[layer_str][head_str].append(v_comp)
-                    current_size += 1
+        self.old_num_c = self.new_num_c
+        self.new_num_c += self.num_classes // self.num_tasks
+        self.lmax_list.append(self.new_num_c)
 
         print(f"[LPrompt] Updated | old_num_k={old_num_k}, new_num_k={new_num_k}")
-        print(f"kmax_list: {self.kmax_list} lmax_list: {self.lmax_list}")
+        print("kmax_list:", self.kmax_list, "lmax_list:", self.lmax_list)
 
-        print(f"[DEBUG] After update - k_comp_gen structure:")
-        for layer_key in self.k_comp_gen.keys():
-            for head_key in self.k_comp_gen[layer_key].keys():
-                print(
-                    f"[DEBUG]   k_comp_gen[{layer_key}][{head_key}] length: {len(self.k_comp_gen[layer_key][head_key])}")
     # ---------------------------
     # Forward
     # ---------------------------
@@ -198,11 +162,6 @@ class LPrompt(nn.Module):
 
     def compute_att_over_prompt(self, batched_prompt, s, f, layer_num, similarity):
         """Atención sobre prompts seleccionados."""
-
-        print(f"[DEBUG] compute_att_over_prompt: s={s}, f={f}, layer_num={layer_num}")
-        print(f"[DEBUG] similarity shape: {similarity.shape}")
-        print(f"[DEBUG] batched_prompt shape: {batched_prompt.shape}")
-
         if batched_prompt.dim() == 2:  # [B, D]
             B, C = batched_prompt.shape
             head_dim = C // self.num_heads
@@ -215,56 +174,17 @@ class LPrompt(nn.Module):
         new_k_prompt_layer = torch.zeros((n_heads, batch_size, head_dim), device=k_prompt_layer.device)
         new_v_prompt_layer = torch.zeros((n_heads, batch_size, head_dim), device=v_prompt_layer.device)
 
-        # AÑADIR MÁS DEBUG
-        print(f"[DEBUG] k_comp_gen type: {type(self.k_comp_gen)}")
-        print(
-            f"[DEBUG] k_comp_gen keys: {list(self.k_comp_gen.keys()) if hasattr(self.k_comp_gen, 'keys') else 'No keys'}")
-
-        if str(layer_num) in self.k_comp_gen:
-            print(f"[DEBUG] k_comp_gen[{layer_num}] keys: {list(self.k_comp_gen[str(layer_num)].keys())}")
-        else:
-            print(f"[ERROR] layer_num {layer_num} not found in k_comp_gen")
-            return batched_prompt  # Retorna input sin modificar
-
         for h in range(self.num_heads):
-            print(f"[DEBUG] Processing head {h}")
-
-            if str(h) not in self.k_comp_gen[str(layer_num)]:
-                print(f"[ERROR] head {h} not found in k_comp_gen[{layer_num}]")
-                continue
-
             k_comp_gen = self.k_comp_gen[str(layer_num)][str(h)]
             v_comp_gen = self.v_comp_gen[str(layer_num)][str(h)]
-
-            print(f"[DEBUG] k_comp_gen[{layer_num}][{h}] length: {len(k_comp_gen)}")
-            print(f"[DEBUG] v_comp_gen[{layer_num}][{h}] length: {len(v_comp_gen)}")
-
             k_prompt_head = k_prompt_layer[h].unsqueeze(1)
             v_prompt_head = v_prompt_layer[h].unsqueeze(1)
-
             for p in range(s, f):
-                print(f"[DEBUG] Processing p={p} (range {s} to {f})")
-
-                if p >= len(k_comp_gen):
-                    print(f"[ERROR] Index {p} out of range for k_comp_gen (length {len(k_comp_gen)})")
-                    print(f"[ERROR] Available indices: 0 to {len(k_comp_gen) - 1}")
-                    break
-
-                if p >= len(v_comp_gen):
-                    print(f"[ERROR] Index {p} out of range for v_comp_gen (length {len(v_comp_gen)})")
-                    break
-
-                # Verificar que similarity tiene las dimensiones correctas
-                sim_idx = p - s
-                if sim_idx >= similarity.shape[1]:
-                    print(f"[ERROR] similarity index {sim_idx} out of range (similarity shape: {similarity.shape})")
-                    break
-
                 new_k_prompt_layer[h] += (
-                        k_comp_gen[p](k_prompt_head).squeeze(1) * similarity[:, sim_idx].unsqueeze(1)
+                    k_comp_gen[p](k_prompt_head).squeeze(1) * similarity[:, p - s].unsqueeze(1)
                 )
                 new_v_prompt_layer[h] += (
-                        v_comp_gen[p](v_prompt_head).squeeze(1) * similarity[:, sim_idx].unsqueeze(1)
+                    v_comp_gen[p](v_prompt_head).squeeze(1) * similarity[:, p - s].unsqueeze(1)
                 )
 
         new_batched_prompt = torch.stack([new_k_prompt_layer, new_v_prompt_layer], dim=0)
@@ -272,5 +192,4 @@ class LPrompt(nn.Module):
         new_batched_prompt = new_batched_prompt.permute(2, 0, 3, 1, 4)
         B, dual, length, H, D = new_batched_prompt.shape
         new_batched_prompt = new_batched_prompt.reshape(B, dual * length, H * D)
-
         return new_batched_prompt

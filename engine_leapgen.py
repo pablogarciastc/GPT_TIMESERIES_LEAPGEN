@@ -182,15 +182,14 @@ def train_one_epoch_with_aux(
     for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
         input, target = input.to(device), target.to(device)
 
-        # --- DESHABILITAR original_model temporalmente
+        # --- cls features from frozen original model
         cls_features = None
-        # COMENTADO PARA EVITAR EL ERROR DE SINCRONIZACIÓN
-        # if original_model is not None:
-        #     with torch.no_grad():
-        #         out0 = original_model(input)
-        #         cls_features = out0["pre_logits"].detach().clone()
+        if original_model is not None:
+            with torch.no_grad():
+                out0 = original_model(input)
+                cls_features = out0["pre_logits"].detach().clone()  # cut graph
 
-        # --- forward del modelo principal
+        # --- forward (NO reuse anything across batches)
         out = model.forwardA1(
             input, target, task_id=task_id,
             cls_features=cls_features, train=set_training_mode
@@ -198,7 +197,7 @@ def train_one_epoch_with_aux(
 
         logits = out["logits"]["logits"]
 
-        # --- construir loss
+        # --- build loss fresh every time
         loss = args.intertask_coeff * criterion(logits, target)
 
         known_classes = task_id * len(class_mask[0])
@@ -206,16 +205,17 @@ def train_one_epoch_with_aux(
                                   target - known_classes, -100)
         loss += criterion(logits[:, known_classes:], cur_targets)
 
-        # pull constraints
+
+        # pull constraints (detach to cut gradient accumulation)
         if args.pull_constraint and "reduce_sim" in out:
-            loss -= args.pull_constraint_coeff * out["reduce_sim"]
+            loss -= args.pull_constraint_coeff * out["reduce_sim"].detach()
 
         loss2 = 0
         if args.pull_constraint and "reduce_sim2" in out:
             if args.dualopt:
-                loss2 = -1 * args.pull_constraint_coeff2 * out['reduce_sim2']
+                loss2 = -1 * args.pull_constraint_coeff2 * output['reduce_sim2']
             else:
-                loss = loss - args.pull_constraint_coeff2 * out['reduce_sim2']
+                loss = loss - args.pull_constraint_coeff2 * output['reduce_sim2']
 
         acc1, acc5 = accuracy(logits, target, topk=(1, 5))
 
@@ -231,7 +231,7 @@ def train_one_epoch_with_aux(
 
         if args.dualopt:
             task_optimizer.zero_grad()
-            loss2.backward(retain_graph=True)
+            loss2.backward()
             task_optimizer.step()
 
         if device.type == 'cuda':
@@ -242,6 +242,7 @@ def train_one_epoch_with_aux(
         metric_logger.meters['Acc@1'].update(acc1.item(), n=input.shape[0])
         metric_logger.meters['Acc@5'].update(acc5.item(), n=input.shape[0])
 
+        # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     logging.info("Averaged stats: {}".format(metric_logger))
@@ -249,6 +250,7 @@ def train_one_epoch_with_aux(
     model.eval()
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
 
 
 @torch.no_grad()
