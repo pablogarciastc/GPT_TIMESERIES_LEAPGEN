@@ -5,26 +5,26 @@ from attention import Gen_Attention2
 
 class LPrompt(nn.Module):
     def __init__(
-        self,
-        length=5,
-        embed_dim=128,
-        num_tasks=10,
-        num_classes=100,
-        embedding_key="mean",
-        prompt_init="uniform",
-        prompt_pool=True,
-        prompt_key=True,
-        pool_size=None,
-        top_k=1,
-        top_k_l=3,
-        batchwise_prompt=False,
-        prompt_key_init="uniform",
-        num_layers=1,
-        use_prefix_tune_for_e_prompt=False,
-        num_heads=8,
-        same_key_value=False,
-        prompts_per_task=5,
-        text_embed_dim=768,
+            self,
+            length=5,
+            embed_dim=128,
+            num_tasks=10,
+            num_classes=100,
+            embedding_key="mean",
+            prompt_init="uniform",
+            prompt_pool=True,
+            prompt_key=True,
+            pool_size=None,
+            top_k=1,
+            top_k_l=3,
+            batchwise_prompt=False,
+            prompt_key_init="uniform",
+            num_layers=1,
+            use_prefix_tune_for_e_prompt=False,
+            num_heads=8,
+            same_key_value=False,
+            prompts_per_task=5,
+            text_embed_dim=768,
     ):
         super().__init__()
         self.length = length
@@ -63,7 +63,8 @@ class LPrompt(nn.Module):
         self.text_proj = nn.Linear(text_embed_dim, embed_dim, bias=False)
         self.prompt_proj = nn.Linear(embed_dim, embed_dim, bias=False)
 
-        # === Generadores de atención ===
+        # === Generadores de atención - FIX: Use total pool size instead of top_k_l ===
+        total_prompts = self.num_tasks * self.prompts_per_task
         self.k_comp_gen = nn.ModuleDict()
         self.v_comp_gen = nn.ModuleDict()
         for i in range(num_layers):
@@ -72,7 +73,8 @@ class LPrompt(nn.Module):
             for j in range(num_heads):
                 self.k_comp_gen[str(i)][str(j)] = nn.ModuleList()
                 self.v_comp_gen[str(i)][str(j)] = nn.ModuleList()
-                for _ in range(top_k_l):
+                # Create enough components for all possible prompts
+                for _ in range(total_prompts):
                     k_comp = Gen_Attention2(embed_dim // num_heads, 1, False, 0.0, 0.0)
                     v_comp = Gen_Attention2(embed_dim // num_heads, 1, False, 0.0, 0.0)
                     self.k_comp_gen[str(i)][str(j)].append(k_comp)
@@ -85,14 +87,15 @@ class LPrompt(nn.Module):
 
         print(
             f"[LPrompt] Initialized | tasks={self.num_tasks}, pool_size={self.pool_size}, "
-            f"num_classes={self.num_classes}, top_k={self.top_k}, top_k_l={self.top_k_l}"
+            f"num_classes={self.num_classes}, top_k={self.top_k}, top_k_l={self.top_k_l}, "
+            f"total_prompts={total_prompts}"
         )
 
     # ---------------------------
     # Helpers
     # ---------------------------
     def l2_normalize(self, x, dim=None, epsilon=1e-12):
-        square_sum = torch.sum(x**2, dim=dim, keepdim=True)
+        square_sum = torch.sum(x ** 2, dim=dim, keepdim=True)
         x_inv_norm = torch.rsqrt(torch.clamp(square_sum, min=epsilon))
         return x * x_inv_norm
 
@@ -116,7 +119,7 @@ class LPrompt(nn.Module):
     # Forward
     # ---------------------------
     def forward(
-        self, x_embed, y=None, task_id=-1, prompt_mask=None, layer_num=0, cls_features=None
+            self, x_embed, y=None, task_id=-1, prompt_mask=None, layer_num=0, cls_features=None
     ):
         out = dict()
         if not self.prompt_pool:
@@ -179,13 +182,22 @@ class LPrompt(nn.Module):
             v_comp_gen = self.v_comp_gen[str(layer_num)][str(h)]
             k_prompt_head = k_prompt_layer[h].unsqueeze(1)
             v_prompt_head = v_prompt_layer[h].unsqueeze(1)
-            for p in range(s, f):
-                new_k_prompt_layer[h] += (
-                    k_comp_gen[p](k_prompt_head).squeeze(1) * similarity[:, p - s].unsqueeze(1)
-                )
-                new_v_prompt_layer[h] += (
-                    v_comp_gen[p](v_prompt_head).squeeze(1) * similarity[:, p - s].unsqueeze(1)
-                )
+
+            # The similarity matrix has shape [batch_size, top_k_l] and corresponds to
+            # the top-k selected prompts for the current task
+            num_selected_prompts = similarity.shape[1]
+
+            # Apply attention using the available prompts and their similarities
+            for i in range(num_selected_prompts):
+                prompt_idx = s + i  # Map to global prompt pool index
+                # Ensure we don't exceed the component generator bounds
+                if prompt_idx < len(k_comp_gen):
+                    new_k_prompt_layer[h] += (
+                            k_comp_gen[prompt_idx](k_prompt_head).squeeze(1) * similarity[:, i].unsqueeze(1)
+                    )
+                    new_v_prompt_layer[h] += (
+                            v_comp_gen[prompt_idx](v_prompt_head).squeeze(1) * similarity[:, i].unsqueeze(1)
+                    )
 
         new_batched_prompt = torch.stack([new_k_prompt_layer, new_v_prompt_layer], dim=0)
         new_batched_prompt = new_batched_prompt.unsqueeze(3).repeat(1, 1, 1, self.length, 1)
