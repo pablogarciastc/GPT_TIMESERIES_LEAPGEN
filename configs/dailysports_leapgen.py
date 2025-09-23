@@ -130,7 +130,7 @@ def get_args_parser(parser):
     parser.add_argument('--intertask_coeff', default=1.0, type=float)
     parser.add_argument('--k_mul', default=50.0, type=float)
     parser.add_argument('--same_key_value', default=False, type=bool)
-    parser.add_argument('--dualopt', default=True, type=bool)
+    parser.add_argument('--dualopt', default=False, type=bool)
 
     # -------------------
     # Attribute generator / prompt parameters

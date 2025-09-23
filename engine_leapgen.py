@@ -179,7 +179,7 @@ def train_one_epoch_with_aux(
 
     header = f"Train: Epoch[{epoch + 1}/{args.epochs}]"
 
-    for batch_idx, (input, target) in enumerate(metric_logger.log_every(data_loader, args.print_freq, header)):
+    for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
         input, target = input.to(device), target.to(device)
 
         # --- cls features from frozen original model
@@ -198,58 +198,58 @@ def train_one_epoch_with_aux(
         logits = out["logits"]["logits"]
 
         # --- build loss fresh every time
-        loss1 = args.intertask_coeff * criterion(logits, target)
+        loss = args.intertask_coeff * criterion(logits, target)
 
         known_classes = task_id * len(class_mask[0])
         cur_targets = torch.where(target - known_classes >= 0,
                                   target - known_classes, -100)
-        loss2 = criterion(logits[:, known_classes:], cur_targets)
+        loss += criterion(logits[:, known_classes:], cur_targets)
 
-        total_loss = loss1 + loss2
 
         # pull constraints (detach to cut gradient accumulation)
         if args.pull_constraint and "reduce_sim" in out:
-            total_loss -= args.pull_constraint_coeff * out["reduce_sim"].detach()
+            loss -= args.pull_constraint_coeff * out["reduce_sim"].detach()
+
+        loss2 = 0
         if args.pull_constraint and "reduce_sim2" in out:
-            total_loss -= args.pull_constraint_coeff2 * out["reduce_sim2"].detach()
+            if args.dualopt:
+                loss2 = -1 * args.pull_constraint_coeff2 * output['reduce_sim2']
+            else:
+                loss = loss - args.pull_constraint_coeff2 * output['reduce_sim2']
 
-        # regularize prompts
-        if args.use_e_prompt and task_id > 0 and old_prompt_matcher is not None:
-            l1_loss = sum(
-                torch.norm(o.detach() - n, p=1)  # old detached, new still in graph
-                for o, n in zip(old_prompt_matcher.parameters(),
-                                model.e_prompt.prompt_proj.parameters())
-            )
-            total_loss = total_loss + 0.01 * l1_loss
+        acc1, acc5 = accuracy(logits, target, topk=(1, 5))
 
-        # --- backward
-        optimizer.zero_grad(set_to_none=True)
-        try:
-            print("SE HACE BACKWARDING")
-            total_loss.backward()
-        except RuntimeError as e:
-            print(f"[Batch {batch_idx}] Backward failed: {e}")
-            continue
+        if not math.isfinite(loss.item()):
+            print("Loss is {}, stopping training".format(loss.item()))
+            sys.exit(1)
 
-        if max_norm > 0:
+        optimizer.zero_grad()
+        loss.backward()
+        if args.use_clip_grad:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-
         optimizer.step()
 
-        # --- metrics (detach everything here!)
-        with torch.no_grad():
-            acc1, acc5 = accuracy(logits.detach(), target, topk=(1, 5))
-            metric_logger.update(Loss=total_loss.item(), Lr=optimizer.param_groups[0]["lr"])
-            metric_logger.meters["Acc@1"].update(acc1.item(), n=input.size(0))
-            metric_logger.meters["Acc@5"].update(acc5.item(), n=input.size(0))
+        if args.dualopt:
+            task_optimizer.zero_grad()
+            loss2.backward()
+            task_optimizer.step()
 
-        # --- safety: delete references so graph cannot survive
-        del out, logits, loss1, loss2, total_loss
+        if device.type == 'cuda':
+            torch.cuda.synchronize()
+        metric_logger.update(Loss=loss.item())
+        metric_logger.update(Lr=optimizer.param_groups[0]["lr"])
 
+        metric_logger.meters['Acc@1'].update(acc1.item(), n=input.shape[0])
+        metric_logger.meters['Acc@5'].update(acc5.item(), n=input.shape[0])
+
+        # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
-    return {k: m.global_avg for k, m in metric_logger.meters.items()}
+    logging.info("Averaged stats: {}".format(metric_logger))
 
+    model.eval()
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
 
