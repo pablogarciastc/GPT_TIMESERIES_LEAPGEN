@@ -182,6 +182,12 @@ def train_one_epoch_with_aux(
     for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
         input, target = input.to(device), target.to(device)
 
+        with torch.no_grad():
+            if original_model is not None:
+                output = original_model(input)
+                cls_features = output['pre_logits']
+            else:
+                cls_features = None
         # --- forward (NO reuse anything across batches)
         out = model.forwardA1(
             input, target, task_id=task_id,
