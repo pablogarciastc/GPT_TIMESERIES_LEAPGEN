@@ -182,13 +182,6 @@ def train_one_epoch_with_aux(
     for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
         input, target = input.to(device), target.to(device)
 
-        # --- cls features from frozen original model
-        cls_features = None
-        if original_model is not None:
-            with torch.no_grad():
-                out0 = original_model(input)
-                cls_features = out0["pre_logits"].detach().clone()  # cut graph
-
         # --- forward (NO reuse anything across batches)
         out = model.forwardA1(
             input, target, task_id=task_id,
