@@ -163,7 +163,11 @@ class LPrompt(nn.Module):
     def compute_att_over_prompt(self, batched_prompt, s, f, layer_num, similarity):
         """Atención sobre prompts seleccionados."""
 
-
+        # Añadir debug información AL PRINCIPIO
+        print(f"[DEBUG] compute_att_over_prompt: s={s}, f={f}")
+        print(f"[DEBUG] layer_num={layer_num}")
+        print(f"[DEBUG] similarity shape: {similarity.shape}")
+        print(f"[DEBUG] batched_prompt shape: {batched_prompt.shape}")
 
 
         if batched_prompt.dim() == 2:  # [B, D]
@@ -196,18 +200,4 @@ class LPrompt(nn.Module):
         new_batched_prompt = new_batched_prompt.permute(2, 0, 3, 1, 4)
         B, dual, length, H, D = new_batched_prompt.shape
         new_batched_prompt = new_batched_prompt.reshape(B, dual * length, H * D)
-
-        # Añadir debug información
-        print(f"[DEBUG] compute_att_over_prompt: s={s}, e={e}")
-        print(f"[DEBUG] k_comp_gen length: {len(self.k_comp_gen)}")
-        print(f"[DEBUG] similarity shape: {similarity.shape}")
-        print(f"[DEBUG] k_prompt_head shape: {k_prompt_head.shape}")
-
-        for p in range(s, e):
-            print(f"[DEBUG] Processing p={p}")
-            if p >= len(self.k_comp_gen):
-                print(f"[ERROR] Index {p} out of range for k_comp_gen (length {len(self.k_comp_gen)})")
-                # Crear el componente faltante o saltear
-                break
-
         return new_batched_prompt
