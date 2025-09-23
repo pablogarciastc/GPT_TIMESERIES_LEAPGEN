@@ -184,26 +184,30 @@ def train_one_epoch_with_aux(
     metric_logger.add_meter("Lr", utils.SmoothedValue(window_size=1, fmt="{value:.5f}"))
     metric_logger.add_meter("Loss", utils.SmoothedValue(window_size=1, fmt="{value:.3f}"))
 
-    header = f"Train: Epoch[{epoch+1}/{args.epochs}]"
+    header = f"Train: Epoch[{epoch + 1}/{args.epochs}]"
 
-    for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
+    for batch_idx, (input, target) in enumerate(metric_logger.log_every(data_loader, args.print_freq, header)):
         input, target = input.to(device), target.to(device)
 
-        # --- features from frozen original model
+        # --- cls features from frozen original model
         cls_features = None
         if original_model is not None:
             with torch.no_grad():
-                out0 = original_model(input)
-                cls_features = out0["pre_logits"]
+                try:
+                    out0 = original_model(input)
+                    cls_features = out0["pre_logits"].detach().clone()  # break old graph
+                except Exception as e:
+                    print(f"[Warning] original_model forward failed: {e}")
+                    cls_features = None
 
-        # --- forward
+        # --- forward pass
         out = model.forwardA1(
             input, target, task_id=task_id,
             cls_features=cls_features, train=set_training_mode
         )
-        logits = out["logits"]["logits"]
+        logits = out["logits"]
 
-        # --- losses
+        # --- base losses
         loss1 = args.intertask_coeff * criterion(logits, target)
 
         known_classes = task_id * len(class_mask[0])
@@ -213,35 +217,45 @@ def train_one_epoch_with_aux(
 
         total_loss = loss1 + loss2
 
+        # --- pull constraints
+        if args.pull_constraint and "reduce_sim" in out:
+            total_loss -= args.pull_constraint_coeff * out["reduce_sim"]
+
+        if args.pull_constraint and "reduce_sim2" in out:
+            total_loss -= args.pull_constraint_coeff2 * out["reduce_sim2"]
+
         # --- prompt regularization
         if args.use_e_prompt and task_id > 0 and old_prompt_matcher is not None:
-            l1_loss = sum(torch.norm(o.detach() - n, p=1)
-                          for o, n in zip(old_prompt_matcher.parameters(),
-                                          model.e_prompt.prompt_proj.parameters()))
-            total_loss += 0.01 * l1_loss
+            l1_loss = sum(
+                torch.norm(o.detach() - n.detach(), p=1)  # detach ambos
+                for o, n in zip(old_prompt_matcher.parameters(),
+                                model.e_prompt.prompt_proj.parameters())
+            )
+            total_loss = total_loss + 0.01 * l1_loss
 
         # --- backward
-        optimizer.zero_grad()
-        total_loss.backward()
+        optimizer.zero_grad(set_to_none=True)  # más seguro
+        try:
+            total_loss.backward()
+        except RuntimeError as e:
+            print(f"[Batch {batch_idx}] Backward failed: {e}")
+            continue
 
-        # gradient clipping
-        if hasattr(args, 'use_clip_grad') and args.use_clip_grad and max_norm > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-        elif max_norm > 0:
+        if max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
 
         optimizer.step()
 
         # --- metrics
-        acc1, acc5 = accuracy(logits, target, topk=(1, 5))
-        metric_logger.update(Loss=total_loss.item(),
-                             Lr=optimizer.param_groups[0]["lr"])
+        acc1, acc5 = accuracy(logits.detach(), target, topk=(1, 5))
+        metric_logger.update(Loss=total_loss.item(), Lr=optimizer.param_groups[0]["lr"])
         metric_logger.meters["Acc@1"].update(acc1.item(), n=input.size(0))
         metric_logger.meters["Acc@5"].update(acc5.item(), n=input.size(0))
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: m.global_avg for k, m in metric_logger.meters.items()}
+
 
 
 
