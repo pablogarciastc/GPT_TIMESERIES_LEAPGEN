@@ -162,6 +162,21 @@ class LPrompt(nn.Module):
 
     def compute_att_over_prompt(self, batched_prompt, s, f, layer_num, similarity):
         """Atención sobre prompts seleccionados."""
+
+        # Añadir debug información
+        print(f"[DEBUG] compute_att_over_prompt: s={s}, e={e}")
+        print(f"[DEBUG] k_comp_gen length: {len(self.k_comp_gen)}")
+        print(f"[DEBUG] similarity shape: {similarity.shape}")
+        print(f"[DEBUG] k_prompt_head shape: {k_prompt_head.shape}")
+
+        for p in range(s, e):
+            print(f"[DEBUG] Processing p={p}")
+            if p >= len(self.k_comp_gen):
+                print(f"[ERROR] Index {p} out of range for k_comp_gen (length {len(self.k_comp_gen)})")
+                # Crear el componente faltante o saltear
+                break
+
+
         if batched_prompt.dim() == 2:  # [B, D]
             B, C = batched_prompt.shape
             head_dim = C // self.num_heads
