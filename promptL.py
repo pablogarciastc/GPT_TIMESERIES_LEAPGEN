@@ -104,7 +104,42 @@ class LPrompt(nn.Module):
                 print(
                     f"[DEBUG]   k_comp_gen[{layer_key}][{head_key}] length: {len(self.k_comp_gen[layer_key][head_key])}")
 
-        # Tu código de process_new_task aquí...
+        # === IMPLEMENTAR LA LÓGICA REAL ===
+
+        # 1. Actualizar tracking variables
+        self.old_num_k = old_num_k
+        self.new_num_k = new_num_k
+
+        # 2. Actualizar listas de tracking
+        self.kmax_list.append(new_num_k)
+        self.lmax_list.append(new_num_k)
+
+        # 3. Guardar embeddings de descriptores
+        if not hasattr(self, 'desc_embed'):
+            self.desc_embed = aux_desc_emb
+        else:
+            # Concatenar nuevos embeddings
+            self.desc_embed = torch.cat([self.desc_embed, aux_desc_emb], dim=0)
+
+        # 4. Expandir generadores de atención si es necesario
+        prompts_needed = new_num_k
+
+        for layer_str in self.k_comp_gen.keys():
+            for head_str in self.k_comp_gen[layer_str].keys():
+                current_size = len(self.k_comp_gen[layer_str][head_str])
+
+                # Añadir nuevos generadores si necesario
+                while current_size < prompts_needed:
+                    head_dim = self.embed_dim // self.num_heads
+                    k_comp = Gen_Attention2(head_dim, 1, False, 0.0, 0.0)
+                    v_comp = Gen_Attention2(head_dim, 1, False, 0.0, 0.0)
+
+                    self.k_comp_gen[layer_str][head_str].append(k_comp)
+                    self.v_comp_gen[layer_str][head_str].append(v_comp)
+                    current_size += 1
+
+        print(f"[LPrompt] Updated | old_num_k={old_num_k}, new_num_k={new_num_k}")
+        print(f"kmax_list: {self.kmax_list} lmax_list: {self.lmax_list}")
 
         print(f"[DEBUG] After update - k_comp_gen structure:")
         for layer_key in self.k_comp_gen.keys():
