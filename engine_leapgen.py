@@ -113,7 +113,7 @@ def train_one_epoch(model: torch.nn.Module,
             sys.exit(1)
 
         optimizer.zero_grad()
-        loss.backward()
+        #loss.backward()
 
         # Fixed gradient clipping
         if hasattr(args, 'use_clip_grad') and args.use_clip_grad and max_norm > 0:
