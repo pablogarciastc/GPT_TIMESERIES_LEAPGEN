@@ -197,123 +197,73 @@ def train_one_epoch_with_aux(
     header = f"Train: Epoch[{epoch + 1}/{args.epochs}]"
 
     for batch_idx, (input, target) in enumerate(metric_logger.log_every(data_loader, args.print_freq, header)):
-        try:
-            input, target = input.to(device), target.to(device)
+        input, target = input.to(device), target.to(device)
 
-            # Clear all gradients completely
-            optimizer.zero_grad()
-            if args.dualopt and task_optimizer is not None:
-                task_optimizer.zero_grad()
-
-            # Clear any potential cached gradients in the model
-            for param in model.parameters():
-                param.grad = None
-
-            # --- get cls features from frozen original model
-            cls_features = None
-            if original_model is not None:
-                with torch.no_grad():
-                    try:
-                        out0 = original_model(input)
-                        cls_features = out0["pre_logits"].detach().clone()
-                    except Exception as e:
-                        print(f"Error in original_model forward: {e}")
-                        cls_features = None
-
-            # Forward pass with explicit tensor creation to avoid graph reuse
-            try:
-                out = model.forwardA1(
-                    input, target, task_id=task_id,
-                    cls_features=cls_features, train=set_training_mode
-                )
-            except Exception as e:
-                print(f"Error in model.forwardA1: {e}")
-                continue
-
-            # Extract logits safely
-            if "logits" not in out or "logits" not in out["logits"]:
-                print("Missing logits in model output")
-                continue
-
-            logits = out["logits"]["logits"]
-
-            # Calculate losses step by step to avoid graph issues
-            try:
-                # Main loss
-                loss1 = args.intertask_coeff * criterion(logits, target)
-
-                # Masked CE loss
-                known_classes = task_id * len(class_mask[0])
-                cur_targets = torch.where(target - known_classes >= 0, target - known_classes, -100)
-                loss2 = criterion(logits[:, known_classes:], cur_targets)
-
-                # Start with base losses
-                total_loss = loss1 + loss2
-
-                # Add pull constraints if present
-                if args.pull_constraint and "reduce_sim" in out:
-                    sim_loss = args.pull_constraint_coeff * out["reduce_sim"]
-                    total_loss = total_loss - sim_loss
-
-                if args.pull_constraint and "reduce_sim2" in out:
-                    sim_loss2 = args.pull_constraint_coeff2 * out["reduce_sim2"]
-                    total_loss = total_loss - sim_loss2
-
-                # Add regularization
-                if args.use_e_prompt and task_id > 0 and old_prompt_matcher is not None:
-                    l1_loss = torch.tensor(0.0, device=device, requires_grad=True)
-                    for old_w, new_w in zip(old_prompt_matcher.parameters(),
-                                            model.e_prompt.prompt_proj.parameters()):
-                        l1_loss = l1_loss + torch.norm(old_w.detach() - new_w, p=1)
-                    total_loss = total_loss + 0.01 * l1_loss
-
-            except Exception as e:
-                print(f"Error calculating loss: {e}")
-                continue
-
-            # Check for valid loss
-            if not torch.isfinite(total_loss):
-                print(f"Non-finite loss: {total_loss.item()}, skipping batch")
-                continue
-
-            # Single backward pass
-            try:
-                total_loss.backward()
-            except RuntimeError as e:
-                print(f"Backward pass error on batch {batch_idx}: {e}")
-                # Clear gradients and continue
-                optimizer.zero_grad()
-                if task_optimizer is not None:
-                    task_optimizer.zero_grad()
-                continue
-
-            # Gradient clipping
-            if hasattr(args, 'use_clip_grad') and args.use_clip_grad and max_norm > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-            elif max_norm > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-
-            # Update parameters
-            optimizer.step()
-            if args.dualopt and task_optimizer is not None:
-                task_optimizer.step()
-
-            # --- metrics
+        # --- get cls features from frozen original model
+        cls_features = None
+        if original_model is not None:
             with torch.no_grad():
-                acc1, acc5 = accuracy(logits.detach(), target, topk=(1, 5))
-                metric_logger.update(Loss=total_loss.item(), Lr=optimizer.param_groups[0]["lr"])
-                metric_logger.meters["Acc@1"].update(acc1.item(), n=input.size(0))
-                metric_logger.meters["Acc@5"].update(acc5.item(), n=input.size(0))
+                out0 = original_model(input)
+                cls_features = out0["pre_logits"].detach().clone()
 
-        except Exception as e:
-            print(f"Unexpected error in training loop: {e}")
-            import traceback
-            traceback.print_exc()
-            continue
+        # --- forward
+        out = model.forwardA1(
+            input, target, task_id=task_id,
+            cls_features=cls_features, train=set_training_mode
+        )
+
+        logits = out["logits"]  # ahora logits es tensor, no dict
+
+        # --- calcular pérdidas
+        loss1 = args.intertask_coeff * criterion(logits, target)
+
+        known_classes = task_id * len(class_mask[0])
+        cur_targets = torch.where(target - known_classes >= 0, target - known_classes, -100)
+        loss2 = criterion(logits[:, known_classes:], cur_targets)
+
+        total_loss = loss1 + loss2
+
+        # pull constraints
+        if args.pull_constraint and "reduce_sim" in out:
+            total_loss -= args.pull_constraint_coeff * out["reduce_sim"]
+
+        if args.pull_constraint and "reduce_sim2" in out:
+            if args.dualopt:
+                total_loss += -args.pull_constraint_coeff2 * out["reduce_sim2"]
+            else:
+                total_loss -= args.pull_constraint_coeff2 * out["reduce_sim2"]
+
+        # regularización prompts
+        if args.use_e_prompt and task_id > 0 and old_prompt_matcher is not None:
+            l1_loss = sum(torch.norm(o.detach() - n, p=1)
+                          for o, n in zip(old_prompt_matcher.parameters(),
+                                          model.e_prompt.prompt_proj.parameters()))
+            total_loss += 0.01 * l1_loss
+
+        # --- backward único
+        optimizer.zero_grad()
+        if args.dualopt and task_optimizer is not None:
+            task_optimizer.zero_grad()
+
+        total_loss.backward()
+
+        if args.use_clip_grad and max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+
+        optimizer.step()
+        if args.dualopt and task_optimizer is not None:
+            task_optimizer.step()
+
+        # --- métricas
+        acc1, acc5 = accuracy(logits.detach(), target, topk=(1, 5))
+        metric_logger.update(Loss=total_loss.item(), Lr=optimizer.param_groups[0]["lr"])
+        metric_logger.meters["Acc@1"].update(acc1.item(), n=input.size(0))
+        metric_logger.meters["Acc@5"].update(acc5.item(), n=input.size(0))
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: m.global_avg for k, m in metric_logger.meters.items()}
+
 
 @torch.no_grad()
 def evaluate(model, data_loader, device, task_id=-1, class_mask=None, args=None):
