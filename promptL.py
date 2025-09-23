@@ -64,24 +64,21 @@ class LPrompt(nn.Module):
         self.prompt_proj = nn.Linear(embed_dim, embed_dim, bias=False)
 
         # === Generadores de atención ===
-        def __init__(self, ...):
-            # ... código existente ...
 
-            # === Generadores de atención ===
-            self.k_comp_gen = nn.ModuleDict()
-            self.v_comp_gen = nn.ModuleDict()
-            for i in range(num_layers):
-                self.k_comp_gen[str(i)] = nn.ModuleDict()
-                self.v_comp_gen[str(i)] = nn.ModuleDict()
-                for j in range(num_heads):
-                    self.k_comp_gen[str(i)][str(j)] = nn.ModuleList()
-                    self.v_comp_gen[str(i)][str(j)] = nn.ModuleList()
-                    for _ in range(top_k_l):
-                        # CORREGIR: usar embed_dim completo, no dividido por heads
-                        k_comp = Gen_Attention2(embed_dim, 1, False, 0.0, 0.0)  # Era: embed_dim // num_heads
-                        v_comp = Gen_Attention2(embed_dim, 1, False, 0.0, 0.0)  # Era: embed_dim // num_heads
-                        self.k_comp_gen[str(i)][str(j)].append(k_comp)
-                        self.v_comp_gen[str(i)][str(j)].append(v_comp)
+        self.k_comp_gen = nn.ModuleDict()
+        self.v_comp_gen = nn.ModuleDict()
+        for i in range(num_layers):
+            self.k_comp_gen[str(i)] = nn.ModuleDict()
+            self.v_comp_gen[str(i)] = nn.ModuleDict()
+            for j in range(num_heads):
+                self.k_comp_gen[str(i)][str(j)] = nn.ModuleList()
+                self.v_comp_gen[str(i)][str(j)] = nn.ModuleList()
+                for _ in range(top_k_l):
+                    # CORREGIR: usar embed_dim completo, no dividido por heads
+                    k_comp = Gen_Attention2(embed_dim, 1, False, 0.0, 0.0)  # Era: embed_dim // num_heads
+                    v_comp = Gen_Attention2(embed_dim, 1, False, 0.0, 0.0)  # Era: embed_dim // num_heads
+                    self.k_comp_gen[str(i)][str(j)].append(k_comp)
+                    self.v_comp_gen[str(i)][str(j)].append(v_comp)
 
         # === Tracking ===
         self.old_num_k, self.new_num_k = 0, 0
