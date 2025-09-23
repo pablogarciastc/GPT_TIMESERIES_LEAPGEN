@@ -241,23 +241,26 @@ def train_one_epoch_with_aux(
                 l1 += torch.norm(old_w.detach() - new_w, p=1)
             loss += 0.01 * l1
 
-        # --- backprop
+        # --- backprop - FIXED VERSION
         optimizer.zero_grad()
         if args.dualopt and task_optimizer is not None:
             task_optimizer.zero_grad()
 
+        # Handle dual optimization properly
         if args.dualopt and aux_loss.requires_grad:
-            loss.backward(retain_graph=True)
-            aux_loss.backward()
+            # Option 1: Combine losses into a single backward pass
+            total_loss = loss + aux_loss
+            total_loss.backward()
+            optimizer.step()
+            task_optimizer.step()
         else:
+            # Standard single optimizer case
             loss.backward()
+            optimizer.step()
 
+        # Gradient clipping after backward but before step
         if args.use_clip_grad and max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-
-        optimizer.step()
-        if args.dualopt and aux_loss.requires_grad:
-            task_optimizer.step()
 
         # --- metrics
         acc1, acc5 = accuracy(logits, target, topk=(1, 5))
