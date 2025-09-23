@@ -165,11 +165,11 @@ import copy
 
 
 def train_one_epoch_with_aux(
-        model, original_model, criterion, data_loader, aux_desc_emb,
-        device, epoch, max_norm=0, optimizer=None,
-        old_prompt_matcher=None, old_prompt=None,
-        set_training_mode=True, task_id=-1, class_mask=None, args=None,
-        old_num_k=5,
+    model, original_model, criterion, data_loader, aux_desc_emb,
+    device, epoch, max_norm=0, optimizer=None,
+    old_prompt_matcher=None, old_prompt=None,
+    set_training_mode=True, task_id=-1, class_mask=None, args=None,
+    old_num_k=5,
 ):
     model.train(set_training_mode)
 
@@ -184,85 +184,65 @@ def train_one_epoch_with_aux(
     metric_logger.add_meter("Lr", utils.SmoothedValue(window_size=1, fmt="{value:.5f}"))
     metric_logger.add_meter("Loss", utils.SmoothedValue(window_size=1, fmt="{value:.3f}"))
 
-    # dualopt special optimizer
-    if args.dualopt:
-        k_params = [p for n, p in model.named_parameters() if "prompt_key2" in n]
-        task_optimizer = optim.Adam(
-            [{"params": k_params, "lr": args.lr * args.k_mul, "weight_decay": args.weight_decay}],
-            weight_decay=args.weight_decay,
-        )
-    else:
-        task_optimizer = None
+    header = f"Train: Epoch[{epoch+1}/{args.epochs}]"
 
-    header = f"Train: Epoch[{epoch + 1}/{args.epochs}]"
-
-    for batch_idx, (input, target) in enumerate(metric_logger.log_every(data_loader, args.print_freq, header)):
+    for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
         input, target = input.to(device), target.to(device)
 
-        # --- get cls features from frozen original model
+        # --- features from frozen original model
         cls_features = None
         if original_model is not None:
             with torch.no_grad():
                 out0 = original_model(input)
-                cls_features = out0["pre_logits"].detach().clone()
+                cls_features = out0["pre_logits"]
 
         # --- forward
         out = model.forwardA1(
             input, target, task_id=task_id,
             cls_features=cls_features, train=set_training_mode
         )
-
         logits = out["logits"]["logits"]
 
-        # --- calcular pérdidas
+        # --- losses
         loss1 = args.intertask_coeff * criterion(logits, target)
 
         known_classes = task_id * len(class_mask[0])
-        cur_targets = torch.where(target - known_classes >= 0, target - known_classes, -100)
+        cur_targets = torch.where(target - known_classes >= 0,
+                                  target - known_classes, -100)
         loss2 = criterion(logits[:, known_classes:], cur_targets)
 
         total_loss = loss1 + loss2
 
-        # pull constraints
-        if args.pull_constraint and "reduce_sim" in out:
-            total_loss -= args.pull_constraint_coeff * out["reduce_sim"]
-
-        if args.pull_constraint and "reduce_sim2" in out:
-            if args.dualopt:
-                total_loss += -args.pull_constraint_coeff2 * out["reduce_sim2"]
-            else:
-                total_loss -= args.pull_constraint_coeff2 * out["reduce_sim2"]
-
-        # regularización prompts
+        # --- prompt regularization
         if args.use_e_prompt and task_id > 0 and old_prompt_matcher is not None:
             l1_loss = sum(torch.norm(o.detach() - n, p=1)
                           for o, n in zip(old_prompt_matcher.parameters(),
                                           model.e_prompt.prompt_proj.parameters()))
             total_loss += 0.01 * l1_loss
 
-        # --- backward único
+        # --- backward
         optimizer.zero_grad()
-        if args.dualopt and task_optimizer is not None:
-            task_optimizer.zero_grad()
-
         total_loss.backward()
 
-        if args.use_clip_grad and max_norm > 0:
+        # gradient clipping
+        if hasattr(args, 'use_clip_grad') and args.use_clip_grad and max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+        elif max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
 
         optimizer.step()
-        if args.dualopt and task_optimizer is not None:
-            task_optimizer.step()
 
-        # --- métricas
-        acc1, acc5 = accuracy(logits.detach(), target, topk=(1, 5))
-        metric_logger.update(Loss=total_loss.item(), Lr=optimizer.param_groups[0]["lr"])
+        # --- metrics
+        acc1, acc5 = accuracy(logits, target, topk=(1, 5))
+        metric_logger.update(Loss=total_loss.item(),
+                             Lr=optimizer.param_groups[0]["lr"])
         metric_logger.meters["Acc@1"].update(acc1.item(), n=input.size(0))
         metric_logger.meters["Acc@5"].update(acc5.item(), n=input.size(0))
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: m.global_avg for k, m in metric_logger.meters.items()}
+
 
 
 @torch.no_grad()
