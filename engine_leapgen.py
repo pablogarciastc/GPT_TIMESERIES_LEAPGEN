@@ -195,7 +195,7 @@ def train_one_epoch_with_aux(
             cls_features=cls_features, train=set_training_mode
         )
 
-        logits = out["logits"]["logits"]
+        logits = out["logits"]
 
         # --- build loss fresh every time
         loss = args.intertask_coeff * criterion(logits, target)
