@@ -1,0 +1,17 @@
+local_datasets/
+utils/generate_test_descriptions/data/DailySports/*.pkl
+
+venv/
+.venv
+.venv/
+.env/
+__pycache__/
+*.pyc
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Logs y temporales
+*.log
+*.tmp

@@ -1,0 +1,200 @@
+{
+    "Sitting": [
+        "mean value around 0.325",
+        "standard deviation of 0.001",
+        "no clear trend",
+        "very low volatility",
+        "strong seasonality with dominant period 1",
+        "5 outliers detected",
+        "skewness -0.866",
+        "kurtosis 0.345",
+        "autocorrelation at lag 1 0.823"
+    ],
+    "Standing": [
+        "mean value around 0.246",
+        "standard deviation of 0.000",
+        "no clear trend",
+        "very low volatility",
+        "moderate seasonality with dominant period 1",
+        "2 outliers detected",
+        "skewness -0.106",
+        "kurtosis 0.315",
+        "autocorrelation at lag 1 0.601"
+    ],
+    "Lying on back": [
+        "mean value around 0.202",
+        "standard deviation of 0.001",
+        "no clear trend",
+        "very low volatility",
+        "strong seasonality with dominant period 1",
+        "2 outliers detected",
+        "skewness 1.025",
+        "kurtosis 0.448",
+        "autocorrelation at lag 1 0.859"
+    ],
+    "Lying on right side": [
+        "mean value around -0.109",
+        "standard deviation of 0.000",
+        "no clear trend",
+        "very low volatility",
+        "moderate seasonality with dominant period 1",
+        "3 outliers detected",
+        "skewness -0.667",
+        "kurtosis 0.447",
+        "autocorrelation at lag 1 0.672"
+    ],
+    "Ascending stairs": [
+        "mean value around 0.219",
+        "standard deviation of 0.031",
+        "no clear trend",
+        "moderate volatility",
+        "strong seasonality with dominant period 1",
+        "25 outliers detected",
+        "skewness -1.228",
+        "kurtosis 0.039",
+        "autocorrelation at lag 1 0.959"
+    ],
+    "Descending stairs": [
+        "mean value around 0.233",
+        "standard deviation of 0.034",
+        "no clear trend",
+        "moderate volatility",
+        "strong seasonality with dominant period 1",
+        "25 outliers detected",
+        "skewness -1.364",
+        "kurtosis 0.238",
+        "autocorrelation at lag 1 0.941"
+    ],
+    "Standing in elevator still": [
+        "mean value around 0.248",
+        "standard deviation of 0.001",
+        "no clear trend",
+        "very low volatility",
+        "strong seasonality with dominant period 1",
+        "1 outliers detected",
+        "skewness 0.262",
+        "kurtosis -0.198",
+        "autocorrelation at lag 1 0.820"
+    ],
+    "Moving around in elevator": [
+        "mean value around 0.156",
+        "standard deviation of 0.007",
+        "no clear trend",
+        "very low volatility",
+        "strong seasonality with dominant period 1",
+        "1 outliers detected",
+        "skewness 0.371",
+        "kurtosis -0.186",
+        "autocorrelation at lag 1 0.735"
+    ],
+    "Walking in parking lot": [
+        "mean value around 0.195",
+        "standard deviation of 0.012",
+        "no clear trend",
+        "low volatility",
+        "moderate seasonality with dominant period 1",
+        "no outliers",
+        "skewness 0.431",
+        "kurtosis -0.179",
+        "autocorrelation at lag 1 0.371"
+    ],
+    "Walking on treadmill flat": [
+        "mean value around 0.188",
+        "standard deviation of 0.009",
+        "no clear trend",
+        "very low volatility",
+        "moderate seasonality with dominant period 28",
+        "no outliers",
+        "skewness 0.050",
+        "kurtosis -0.564",
+        "autocorrelation at lag 1 0.190"
+    ],
+    "Walking on treadmill inclined": [
+        "mean value around 0.129",
+        "standard deviation of 0.013",
+        "no clear trend",
+        "moderate volatility",
+        "moderate seasonality with dominant period 31",
+        "no outliers",
+        "skewness -0.184",
+        "kurtosis -0.609",
+        "autocorrelation at lag 1 0.562"
+    ],
+    "Running on treadmill": [
+        "mean value around -0.205",
+        "standard deviation of 0.025",
+        "no clear trend",
+        "moderate volatility",
+        "moderate seasonality with dominant period 24",
+        "no outliers",
+        "skewness -0.160",
+        "kurtosis -0.252",
+        "autocorrelation at lag 1 0.315"
+    ],
+    "Exercising on stepper": [
+        "mean value around 0.130",
+        "standard deviation of 0.009",
+        "no clear trend",
+        "low volatility",
+        "moderate seasonality with dominant period 1",
+        "no outliers",
+        "skewness 0.031",
+        "kurtosis -0.675",
+        "autocorrelation at lag 1 0.471"
+    ],
+    "Exercising on cross trainer": [
+        "mean value around -0.175",
+        "standard deviation of 0.012",
+        "no clear trend",
+        "low volatility",
+        "moderate seasonality with dominant period 1",
+        "no outliers",
+        "skewness -0.031",
+        "kurtosis -0.777",
+        "autocorrelation at lag 1 0.621"
+    ],
+    "Cycling horizontal": [
+        "mean value around 0.607",
+        "standard deviation of 0.007",
+        "no clear trend",
+        "very low volatility",
+        "strong seasonality with dominant period 1",
+        "1 outliers detected",
+        "skewness 0.298",
+        "kurtosis -0.170",
+        "autocorrelation at lag 1 0.773"
+    ],
+    "Cycling vertical": [
+        "mean value around 0.587",
+        "standard deviation of 0.011",
+        "no clear trend",
+        "very low volatility",
+        "strong seasonality with dominant period 1",
+        "no outliers",
+        "skewness -0.116",
+        "kurtosis -0.436",
+        "autocorrelation at lag 1 0.841"
+    ],
+    "Rowing": [
+        "mean value around 0.143",
+        "standard deviation of 0.029",
+        "no clear trend",
+        "high volatility",
+        "moderate seasonality with dominant period 11",
+        "5 outliers detected",
+        "skewness 0.023",
+        "kurtosis 0.247",
+        "autocorrelation at lag 1 0.169"
+    ],
+    "Jumping": [
+        "mean value around 0.040",
+        "standard deviation of 0.028",
+        "no clear trend",
+        "high volatility",
+        "moderate seasonality with dominant period 1",
+        "no outliers",
+        "skewness -0.166",
+        "kurtosis -0.547",
+        "autocorrelation at lag 1 0.466"
+    ]
+}
