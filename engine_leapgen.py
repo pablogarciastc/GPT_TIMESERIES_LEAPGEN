@@ -225,6 +225,7 @@ def train_one_epoch_with_aux(
         # --- backward
         optimizer.zero_grad(set_to_none=True)
         try:
+            print("SE HACE BACKWARDING")
             total_loss.backward()
         except RuntimeError as e:
             print(f"[Batch {batch_idx}] Backward failed: {e}")
