@@ -459,10 +459,9 @@ def evaluate_till_now_with_aux(model: torch.nn.Module, original_model: torch.nn.
 
     return test_stats
 
-def train_and_evaluate(model, original_model,
-                       criterion, data_loader, lr_scheduler, optimizer, device,
-                       class_mask=None, args=None):
 
+def train_and_evaluate(model, original_model, criterion, data_loader, lr_scheduler, optimizer, device, class_mask=None,
+                       args=None):
     acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
     old_num_k = 0
     aux_desc_emb = None
@@ -478,26 +477,28 @@ def train_and_evaluate(model, original_model,
         if task_id > 0:
             model.head.update(len(class_mask[task_id]))
 
-        # --- reinicializar optimizador
-        print("Reinitializing optimizer...")
-        optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-        lr_scheduler = (optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
-                        if args.sched != "constant" else None)
-
-        # --- registrar prompts para nueva tarea (en ambos modelos!)
+        # --- registrar prompts para nueva tarea EN AMBOS MODELOS
         if args.use_e_prompt:
             curr_num_k = args.top_k_l
 
             if task_id == 0:
                 model.e_prompt.process_new_task(0, curr_num_k, new_desc)
+                # SINCRONIZAR original_model
                 if original_model is not None:
                     original_model.e_prompt.process_new_task(0, curr_num_k, new_desc)
             else:
                 model.e_prompt.process_new_task(old_num_k, old_num_k + curr_num_k, aux_desc_emb)
+                # SINCRONIZAR original_model
                 if original_model is not None:
                     original_model.e_prompt.process_new_task(old_num_k, old_num_k + curr_num_k, aux_desc_emb)
         else:
             curr_num_k = 0
+
+        # --- reinicializar optimizador
+        print("Reinitializing optimizer...")
+        optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        lr_scheduler = (optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
+                        if args.sched != "constant" else None)
 
         # --- entrenamiento
         for epoch in range(args.epochs):
