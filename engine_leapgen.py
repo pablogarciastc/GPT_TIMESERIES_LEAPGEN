@@ -224,14 +224,14 @@ def train_one_epoch_with_aux(
             sys.exit(1)
 
         optimizer.zero_grad()
-        loss.backward()
+        loss.backward(retain_graph=True)
         if args.use_clip_grad:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
         optimizer.step()
 
         if args.dualopt:
             task_optimizer.zero_grad()
-            loss2.backward()
+            loss2.backward(retain_graph=True)
             task_optimizer.step()
 
         if device.type == 'cuda':
