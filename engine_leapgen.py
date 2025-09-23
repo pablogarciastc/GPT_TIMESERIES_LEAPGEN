@@ -199,22 +199,30 @@ def train_one_epoch_with_aux(
     for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
         input, target = input.to(device), target.to(device)
 
+        # Clear gradients at the beginning of each iteration
+        optimizer.zero_grad()
+        if args.dualopt and task_optimizer is not None:
+            task_optimizer.zero_grad()
+
         # --- get cls features from frozen original model
         with torch.no_grad():
             cls_features = None
             if original_model is not None:
                 out0 = original_model(input)
                 cls_features = out0["pre_logits"]
+                # Ensure we don't keep references to the original model's computation graph
+                cls_features = cls_features.detach()
 
+        # Forward pass
         out = model.forwardA1(
             input, target, task_id=task_id,
             cls_features=cls_features, train=set_training_mode
         )
 
-        # out es un dict -> necesitas logits
+        # Extract logits
         logits = out["logits"]["logits"]
 
-        # ahora sí, calcula la loss
+        # Calculate main loss
         loss = args.intertask_coeff * criterion(logits, target)
 
         # --- masked CE (task-specific)
@@ -222,45 +230,42 @@ def train_one_epoch_with_aux(
         cur_targets = torch.where(target - known_classes >= 0, target - known_classes, -100)
         loss += criterion(logits[:, known_classes:], cur_targets)
 
-        # --- pull constraint
-        aux_loss = torch.tensor(0.0, device=device)
+        # --- pull constraint - handle carefully to avoid graph reuse
         if args.pull_constraint and "reduce_sim" in out:
-            loss -= args.pull_constraint_coeff * out["reduce_sim"]
+            loss = loss - args.pull_constraint_coeff * out["reduce_sim"]
 
         if args.pull_constraint and "reduce_sim2" in out:
             if args.dualopt:
-                aux_loss = -args.pull_constraint_coeff2 * out["reduce_sim2"]
+                # For dual optimization, add to main loss instead of separate aux_loss
+                loss = loss - args.pull_constraint_coeff2 * out["reduce_sim2"]
             else:
-                loss -= args.pull_constraint_coeff2 * out["reduce_sim2"]
+                loss = loss - args.pull_constraint_coeff2 * out["reduce_sim2"]
 
         # --- regularize prompts
-        if args.use_e_prompt and task_id > 0:
+        if args.use_e_prompt and task_id > 0 and old_prompt_matcher is not None:
             l1 = 0.0
             for old_w, new_w in zip(old_prompt_matcher.parameters(),
                                     model.e_prompt.prompt_proj.parameters()):
                 l1 += torch.norm(old_w.detach() - new_w, p=1)
-            loss += 0.01 * l1
+            loss = loss + 0.01 * l1
 
-        # --- backprop - FIXED VERSION
-        optimizer.zero_grad()
-        if args.dualopt and task_optimizer is not None:
-            task_optimizer.zero_grad()
+        # --- Single backward pass
+        if not math.isfinite(loss.item()):
+            print("Loss is {}, stopping training".format(loss.item()))
+            sys.exit(1)
 
-        # Handle dual optimization properly
-        if args.dualopt and aux_loss.requires_grad:
-            # Option 1: Combine losses into a single backward pass
-            total_loss = loss + aux_loss
-            total_loss.backward()
-            optimizer.step()
-            task_optimizer.step()
-        else:
-            # Standard single optimizer case
-            loss.backward()
-            optimizer.step()
+        loss.backward()
 
-        # Gradient clipping after backward but before step
-        if args.use_clip_grad and max_norm > 0:
+        # Gradient clipping
+        if hasattr(args, 'use_clip_grad') and args.use_clip_grad and max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+        elif max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+
+        # Update parameters
+        optimizer.step()
+        if args.dualopt and task_optimizer is not None:
+            task_optimizer.step()
 
         # --- metrics
         acc1, acc5 = accuracy(logits, target, topk=(1, 5))
