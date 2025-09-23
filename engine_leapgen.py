@@ -212,7 +212,7 @@ def train_one_epoch_with_aux(
             cls_features=cls_features, train=set_training_mode
         )
 
-        logits = out["logits"]  # ahora logits es tensor, no dict
+        logits = out["logits"]["logits"]
 
         # --- calcular pérdidas
         loss1 = args.intertask_coeff * criterion(logits, target)
