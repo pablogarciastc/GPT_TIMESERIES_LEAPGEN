@@ -205,7 +205,7 @@ def train_one_epoch_with_aux(
             input, target, task_id=task_id,
             cls_features=cls_features, train=set_training_mode
         )
-        logits = out["logits"]
+        logits = out["logits"]["logits"]
 
         # --- base losses
         loss1 = args.intertask_coeff * criterion(logits, target)
