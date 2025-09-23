@@ -182,19 +182,20 @@ def train_one_epoch_with_aux(
     for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
         input, target = input.to(device), target.to(device)
 
-        with torch.no_grad():
-            if original_model is not None:
-                output = original_model(input)
-                cls_features = output['pre_logits']
-            else:
-                cls_features = None
+        # --- cls features from frozen original model
+        cls_features = None
+        if original_model is not None:
+            with torch.no_grad():
+                out0 = original_model(input)
+                cls_features = out0["pre_logits"].detach().clone()  # cut graph
+
         # --- forward (NO reuse anything across batches)
         out = model.forwardA1(
             input, target, task_id=task_id,
             cls_features=cls_features, train=set_training_mode
         )
 
-        logits = out["logits"]
+        logits = out["logits"]["logits"]
 
         # --- build loss fresh every time
         loss = args.intertask_coeff * criterion(logits, target)
@@ -223,6 +224,7 @@ def train_one_epoch_with_aux(
             sys.exit(1)
 
         optimizer.zero_grad()
+        print("ACCEDIENDO AL BACKWARD")
         loss.backward()
         if args.use_clip_grad:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)

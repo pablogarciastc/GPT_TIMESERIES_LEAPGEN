@@ -159,15 +159,15 @@ class MomentTransformerL(nn.Module):
         return features
 
     # -------------------------------------------------
-    def forward(self, x, task_id=-1, cls_features=None, train=False):
-        res = self.forward_features(x, task_id=task_id, cls_features=cls_features, train=train)
-        # res = self.forward_head2(res, device=x.device)
-        return res
+    def forward(self, x, task_id=-1, train=True):
+        feats = self.forward_features(x, task_id=task_id, train=train)
+        logits = self.head(feats)
+        return {"logits": logits, "pre_logits": feats}
 
-
-    def forwardA1(self, x, y, task_id=-1, cls_features=None, train=False, kl_idx=None):
-        res = self.forward_featuresA1(x, y, task_id=task_id, cls_features=cls_features, train=train)
-        return res
+    def forwardA1(self, x, target=None, task_id=-1, cls_features=None, train=True):
+        feats = self.forward_features(x, task_id=task_id, train=train, cls_features=cls_features)
+        logits = self.head(feats)
+        return {"logits": logits, "pre_logits": feats}
 
     def forward2(self, x, max_t=None):
         feats = self.forward_features(x, task_id=-1, train=False)
