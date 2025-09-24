@@ -43,8 +43,20 @@ def main(args):
     data_loader, class_mask = build_continual_dataloader(args)
     print("NB Classes:", args.nb_classes)
 
+
     # --- Build model ---
     print(f"Creating model: {args.model}")
+    original_model = create_model(
+        args.model,
+        pretrained=args.pretrained,
+        num_classes=args.nb_classes,
+        drop_rate=args.dropout,
+        drop_path_rate=0.0,
+        args=args
+    )
+
+
+
     model = create_model(
         args.model,                     # e.g. "moment_base"
         pretrained=args.pretrained,
@@ -76,10 +88,14 @@ def main(args):
         prompts_per_task=args.num_prompts_per_task,
         args=args,
     )
+    original_model.to(device)
     model.to(device)
 
     # --- Freeze layers if requested ---
     if args.freeze:
+        for p in original_model.parameters():
+            p.requires_grad = False
+
         for n, p in model.named_parameters():
             if any(f in n for f in args.freeze):
                 p.requires_grad = False
@@ -121,12 +137,6 @@ def main(args):
     optimizer = create_optimizer(args, model_without_ddp)
     lr_scheduler, _ = create_scheduler(args, optimizer)
 
-    # 🔥 Define original_model as a frozen copy of the initial model
-    original_model = copy.deepcopy(model_without_ddp)
-    for p in original_model.parameters():
-        p.requires_grad = False
-    original_model.eval()
-
     print("Start training...")
     start_time = time.time()
     acc_matrix = train_and_evaluate(
@@ -135,7 +145,7 @@ def main(args):
 )
     total_time = time.time() - start_time
     print("Total training time:", str(datetime.timedelta(seconds=int(total_time))))
-
+    print("ACC MATRIX: ", acc_matrix)
 
 if __name__ == '__main__':
     import argparse

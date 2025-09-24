@@ -44,7 +44,7 @@ class MomentTransformerL(nn.Module):
         self.embed_dim = 128  # 🔑 fixed working dim
 
         # === Backbone ===
-        self.backbone = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-large")
+        self.backbone = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-small")
         self.input_proj = nn.Linear(self.args.num_features, self.embed_dim)
 
         # === E-Prompt ===
