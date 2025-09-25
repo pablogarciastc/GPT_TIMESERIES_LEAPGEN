@@ -54,12 +54,6 @@ class MomentTransformerL(nn.Module):
         self.backbone.init()
         self.classifier = nn.Linear(128, num_classes)
 
-        # Project input features into model embedding space
-        self.input_proj = nn.Linear(45, 128)
-
-        # Classification head on top of MOMENT embeddings
-        self.classifier = nn.Linear(128, num_classes)
-
         # === E-Prompt ===
         self.use_e_prompt = getattr(args, "use_e_prompt", True)
         if self.use_e_prompt:
