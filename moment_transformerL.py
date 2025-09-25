@@ -44,8 +44,22 @@ class MomentTransformerL(nn.Module):
         self.embed_dim = 128  # 🔑 fixed working dim
 
         # === Backbone ===
-        self.backbone = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-small")
-        self.input_proj = nn.Linear(self.args.num_features, self.embed_dim)
+        self.backbone = MOMENTPipeline.from_pretrained(
+            "AutonLab/MOMENT-1-small",
+            model_kwargs={
+                "task_name": "embedding",  # we use embeddings from backbone
+                "freeze_encoder": False,
+                "freeze_embedder": False,
+                "freeze_head": True,
+            }
+        )
+        self.backbone.init()
+
+        # Project input features into model embedding space
+        self.input_proj = nn.Linear(45, 128)
+
+        # Classification head on top of MOMENT embeddings
+        self.classifier = nn.Linear(128, num_classes)
 
         # === E-Prompt ===
         self.use_e_prompt = getattr(args, "use_e_prompt", True)
@@ -69,7 +83,7 @@ class MomentTransformerL(nn.Module):
                 num_heads=args.num_heads,
                 same_key_value=same_key_value,
                 prompts_per_task=prompts_per_task,
-                text_embed_dim=768,  # SentenceTransformer/roberta embeddings
+                text_embed_dim=768,
             )
 
         # === G-Prompt (optional) ===
