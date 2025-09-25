@@ -44,8 +44,20 @@ class MomentTransformerL(nn.Module):
         self.embed_dim = 128  # 🔑 fixed working dim
 
         # === Backbone ===
-        self.backbone = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-small")
-        self.input_proj = nn.Linear(self.args.num_features, self.embed_dim)
+        self.backbone = MOMENTPipeline.from_pretrained(
+            "AutonLab/MOMENT-1-small",
+            model_kwargs={
+                'task_name': 'classification',
+                'n_channels': 45,
+                'num_class': 18,
+                'freeze_encoder': False,
+                'freeze_embedder': False,
+                'freeze_head': False,
+            },
+        )
+        self.backbone.init()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.backbone.model.to(device)        self.input_proj = nn.Linear(self.args.num_features, self.embed_dim)
 
         # === E-Prompt ===
         self.use_e_prompt = getattr(args, "use_e_prompt", True)
