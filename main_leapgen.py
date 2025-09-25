@@ -26,6 +26,8 @@ warnings.filterwarnings(
     'ignore',
     'Argument interpolation should be of type InterpolationMode instead of int'
 )
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 def main(args):
