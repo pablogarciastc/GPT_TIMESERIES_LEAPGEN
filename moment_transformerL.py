@@ -57,7 +57,7 @@ class MomentTransformerL(nn.Module):
         )
         self.backbone.init()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.backbone.model.to(device)
+        self.backbone.to(device)
         self.input_proj = nn.Linear(self.args.num_features, self.embed_dim)
 
         # === E-Prompt ===
