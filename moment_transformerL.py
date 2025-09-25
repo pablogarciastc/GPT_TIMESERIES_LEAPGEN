@@ -47,7 +47,9 @@ class MomentTransformerL(nn.Module):
         self.backbone = MOMENTPipeline.from_pretrained(
             "AutonLab/MOMENT-1-small",
             model_kwargs={
-                "task_name": "embedding",  # we use embeddings from backbone
+                "task_name": "classification",  # we use embeddings from backbone
+                "n_channels": 128,  # after projection
+                "num_class": num_classes,
                 "freeze_encoder": False,
                 "freeze_embedder": False,
                 "freeze_head": True,
