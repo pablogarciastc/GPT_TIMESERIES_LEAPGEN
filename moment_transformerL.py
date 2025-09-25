@@ -47,15 +47,12 @@ class MomentTransformerL(nn.Module):
         self.backbone = MOMENTPipeline.from_pretrained(
             "AutonLab/MOMENT-1-small",
             model_kwargs={
-                "task_name": "classification",  # we use embeddings from backbone
-                "n_channels": 128,  # after projection
-                "num_class": num_classes,
-                "freeze_encoder": False,
-                "freeze_embedder": False,
-                "freeze_head": True,
+                "task_name": "embedding",
+                "n_channels": 128,
             }
         )
         self.backbone.init()
+        self.classifier = nn.Linear(128, num_classes)
 
         # Project input features into model embedding space
         self.input_proj = nn.Linear(45, 128)
@@ -175,10 +172,12 @@ class MomentTransformerL(nn.Module):
         return features
 
     # -------------------------------------------------
-    def forward(self, x, task_id=-1, train=True):
-        feats = self.forward_features(x, task_id=task_id, train=train)
-        logits = self.head(feats)
-        return {"logits": logits, "pre_logits": feats}
+
+    def forward(self, x):
+        x_proj = self.input_proj(x).permute(0, 2, 1)
+        out = self.backbone(x_enc=x_proj)
+        z = out.embeddings.mean(dim=1)  # pool across seq
+        return self.classifier(z)
 
     def forwardA1(self, x, target=None, task_id=-1, cls_features=None, train=True):
         feats = self.forward_features(x, task_id=task_id, train=train, cls_features=cls_features)
