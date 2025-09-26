@@ -171,73 +171,68 @@ def train_one_epoch_with_aux(
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("Lr", utils.SmoothedValue(window_size=1, fmt="{value:.5f}"))
     metric_logger.add_meter("Loss", utils.SmoothedValue(window_size=1, fmt="{value:.3f}"))
-    if args.dualopt:
-        k_params = []
+
+    k_params = []
+    if getattr(args, "dualopt", False):
         for n, p in model.named_parameters():
-            if n.find('prompt_key2') >=0:
+            if 'prompt_key2' in n:
                 k_params.append(p)
-        k_network_params = [{'params': k_params, 'lr': args.lr*args.k_mul, 'weight_decay': args.weight_decay}]
-        task_optimizer = optim.Adam(k_network_params, weight_decay=args.weight_decay)
+    task_optimizer = optim.Adam(
+        [{'params': k_params, 'lr': args.lr*args.k_mul, 'weight_decay': args.weight_decay}]
+    ) if getattr(args, "dualopt", False) else None
 
     header = f"Train: Epoch[{epoch + 1}/{args.epochs}]"
+    need_second_pass = bool(getattr(args, "dualopt", False) and getattr(args, "pull_constraint", False))
 
-    for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
-        input = input.to(device, non_blocking=True)
+    for inp, target in metric_logger.log_every(data_loader, args.print_freq, header):
+        inp = inp.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
 
-        # --- cls features from frozen original model
         cls_features = None
         if original_model is not None:
             with torch.no_grad():
-                out0 = original_model(input)
+                out0 = original_model(inp)
                 cls_features = out0["pre_logits"]
 
-        # --- forward (NO reuse anything across batches)
-        # Get the output once
-        output = model.forwardA1(input, target, task_id=task_id, cls_features=cls_features, train=set_training_mode)
-        logits = output['logits']['logits']
+        out = model.forwardA1(inp, target, task_id=task_id, cls_features=cls_features, train=set_training_mode)
+        lg_any = out['logits']
+        logits = lg_any['logits'] if isinstance(lg_any, dict) else lg_any
 
-        # Build main loss (including reduce_sim)
         loss = args.intertask_coeff * criterion(logits, target)
         known_classes = task_id * len(class_mask[0])
         cur_targets = torch.where(target - known_classes >= 0, target - known_classes, -100)
-        loss += criterion(logits[:, known_classes:], cur_targets)
+        loss = loss + criterion(logits[:, known_classes:], cur_targets)
 
-        if args.pull_constraint and "reduce_sim" in output:
-            loss = loss - args.pull_constraint_coeff * output["reduce_sim"]
+        if getattr(args, "pull_constraint", False) and out.get("reduce_sim", None) is not None:
+            loss = loss - args.pull_constraint_coeff * out["reduce_sim"]
 
-        # First backward pass
-        optimizer.zero_grad()
-        loss.backward()
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward(retain_graph=need_second_pass)
+        if max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
         optimizer.step()
 
-        # Separate forward pass for dual optimizer
-        if args.dualopt and args.pull_constraint:
-            output2 = model.forwardA1(input, target, task_id=task_id, cls_features=cls_features,
-                                      train=set_training_mode)
-            if "reduce_sim2" in output2 and output2["reduce_sim2"] is not None:
-                loss2 = -1 * args.pull_constraint_coeff2 * output2['reduce_sim2']
-                task_optimizer.zero_grad()
+        if need_second_pass:
+            out2 = model.forwardA1(inp, target, task_id=task_id, cls_features=cls_features, train=set_training_mode)
+            if out2.get("reduce_sim2", None) is not None:
+                loss2 = -args.pull_constraint_coeff2 * out2["reduce_sim2"]
+                task_optimizer.zero_grad(set_to_none=True)
                 loss2.backward()
                 task_optimizer.step()
 
         if device.type == 'cuda':
             torch.cuda.synchronize()
+
         metric_logger.update(Loss=loss.item())
         metric_logger.update(Lr=optimizer.param_groups[0]["lr"])
         acc1, acc5 = accuracy(logits, target, topk=(1, 5))
+        metric_logger.meters['Acc@1'].update(acc1.item(), n=inp.shape[0])
+        metric_logger.meters['Acc@5'].update(acc5.item(), n=inp.shape[0])
 
-        metric_logger.meters['Acc@1'].update(acc1.item(), n=input.shape[0])
-        metric_logger.meters['Acc@5'].update(acc5.item(), n=input.shape[0])
-
-        # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
     logging.info("Averaged stats: {}".format(metric_logger))
+    return {k: m.global_avg for k, m in metric_logger.meters.items()}
 
-    model.eval()
-
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
 
@@ -252,7 +247,8 @@ def evaluate(model, data_loader, device, task_id=-1, class_mask=None, args=None)
     for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
         input, target = input.to(device), target.to(device)
         out = model(input, task_id=task_id)
-        logits = out["logits"]["logits"]
+        lg_any = out["logits"]
+        logits = lg_any["logits"] if isinstance(lg_any, dict) else lg_any
 
         if args.task_inc and class_mask is not None:
             mask = torch.tensor(class_mask[task_id], dtype=torch.int64, device=device)
@@ -312,7 +308,8 @@ def evaluate_with_aux(model: torch.nn.Module, original_model: torch.nn.Module, d
                     cls_features = None
 
             output = model.forwardA1(input, None, -1, cls_features=cls_features, train=False)
-            logits = output['logits']
+            lg_any = output['logits']
+            logits = lg_any['logits'] if isinstance(lg_any, dict) else lg_any
 
             if hasattr(args, 'task_inc') and args.task_inc and class_mask is not None:
                 mask = class_mask[task_id]
@@ -482,10 +479,10 @@ def train_and_evaluate(model, original_model, criterion, data_loader, lr_schedul
             curr_num_k = 0
 
         # --- reinicializar optimizador
-        print("Reinitializing optimizer...")
-        optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-        lr_scheduler = (optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
-                        if args.sched != "constant" else None)
+        main_params = [p for n, p in model.named_parameters() if 'prompt_key2' not in n]
+        optimizer = optim.Adam(main_params, lr=args.lr, weight_decay=args.weight_decay)
+        lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs,
+                                                            eta_min=1e-6) if args.sched != "constant" else None
 
         # --- entrenamiento
         for epoch in range(args.epochs):
