@@ -347,81 +347,98 @@ class LPrompt(nn.Module):
               f"embed_dim={self.embed_dim}, max_pool_size={self.max_pool_size}")
 
     def generate_prompts(self, batched_prompt, start_prompt, end_prompt, layer_num, weights):
-        """Generate final prompts using attention generators - FIXED VERSION"""
+        """Generate final prompts using your existing generator structure"""
+
+        # Handle input dimensions
         if batched_prompt.dim() == 2:
             batched_prompt = batched_prompt.unsqueeze(1)
 
         B, seq_len, D = batched_prompt.shape
         head_dim = D // self.num_heads
 
-        # Reshape for multi-head attention
-        prompt_heads = batched_prompt.view(B, seq_len, self.num_heads, head_dim)
-        prompt_heads = prompt_heads.permute(2, 0, 1, 3)  # [H, B, seq_len, head_dim]
+        # Reshape for multi-head processing
+        batched_prompt = batched_prompt.view(B, seq_len, self.num_heads, head_dim)
+        batched_prompt = batched_prompt.permute(2, 0, 1, 3)  # [H, B, seq_len, head_dim]
 
-        k_prompts = torch.zeros_like(prompt_heads)
-        v_prompts = torch.zeros_like(prompt_heads)
+        k_prompts = torch.zeros_like(batched_prompt)
+        v_prompts = torch.zeros_like(batched_prompt)
 
-        # Handle layer_num bounds
-        layer_key = f"layer_{layer_num}"
-        if layer_key not in self.k_comp_gen:
-            layer_num = 0  # Fallback to first layer
-            layer_key = f"layer_{layer_num}"
+        # Use your existing generator structure
+        layer_key = str(layer_num)
 
-        # Use the original generator structure from your code
         for head_idx in range(self.num_heads):
             head_key = str(head_idx)
-            if head_key not in self.k_comp_gen[layer_key]:
-                continue
 
-            k_gens = self.k_comp_gen[layer_key][head_key]
-            v_gens = self.v_comp_gen[layer_key][head_key]
+            # Check if generators exist for this layer and head
+            if (layer_key in self.k_comp_gen and
+                    head_key in self.k_comp_gen[layer_key] and
+                    layer_key in self.v_comp_gen and
+                    head_key in self.v_comp_gen[layer_key]):
 
-            prompt_head = prompt_heads[head_idx]  # [B, seq_len, head_dim]
-            prompt_head_input = prompt_head.unsqueeze(1)  # [B, 1, head_dim] for generator input
+                k_gens = self.k_comp_gen[layer_key][head_key]
+                v_gens = self.v_comp_gen[layer_key][head_key]
 
-            # Use weighted combination of generators
-            weight_dim = min(weights.shape[1] if len(weights.shape) > 1 else 1,
-                             end_prompt - start_prompt, len(k_gens))
+                # Get the prompt for this head
+                head_prompt = batched_prompt[head_idx]  # [B, seq_len, head_dim]
+                head_prompt_input = head_prompt.unsqueeze(1)  # Add sequence dim for generator
 
-            for i in range(weight_dim):
-                gen_idx = start_prompt + i
-                if gen_idx < len(k_gens) and gen_idx < len(v_gens):
-                    try:
-                        # Get weight for this generator
-                        if len(weights.shape) > 1 and i < weights.shape[1]:
-                            weight = weights[:, i:i + 1].unsqueeze(-1)  # [B, 1, 1]
-                        else:
-                            weight = torch.ones(B, 1, 1, device=prompt_head.device) / weight_dim
+                # Apply generators with weights
+                num_prompts_to_use = min(
+                    weights.shape[1] if len(weights.shape) > 1 else 1,
+                    end_prompt - start_prompt,
+                    len(k_gens),
+                    len(v_gens)
+                )
 
-                        # Apply generators
-                        k_out = k_gens[gen_idx](prompt_head_input).squeeze(1)  # [B, head_dim]
-                        v_out = v_gens[gen_idx](prompt_head_input).squeeze(1)  # [B, head_dim]
+                for i in range(num_prompts_to_use):
+                    gen_idx = start_prompt + i
+                    if gen_idx < len(k_gens) and gen_idx < len(v_gens):
+                        try:
+                            # Get weight for this generator
+                            if len(weights.shape) > 1 and i < weights.shape[1]:
+                                weight = weights[:, i].unsqueeze(-1).unsqueeze(-1)  # [B, 1, 1]
+                            else:
+                                weight = torch.ones(B, 1, 1, device=head_prompt.device) / num_prompts_to_use
 
-                        # Accumulate weighted outputs
-                        k_prompts[head_idx, :, 0, :] += weight.squeeze(-1) * k_out
-                        v_prompts[head_idx, :, 0, :] += weight.squeeze(-1) * v_out
+                            # Apply generators
+                            k_out = k_gens[gen_idx](head_prompt_input)  # Should output [B, seq_len, head_dim]
+                            v_out = v_gens[gen_idx](head_prompt_input)
 
-                    except Exception as e:
-                        print(f"Warning: Error in generator {gen_idx}: {e}")
-                        continue
+                            # Handle generator output dimensions
+                            if k_out.dim() == 2:  # [B, head_dim]
+                                k_out = k_out.unsqueeze(1)  # [B, 1, head_dim]
+                            if v_out.dim() == 2:
+                                v_out = v_out.unsqueeze(1)
 
-        # Combine k and v prompts
+                            # Accumulate weighted outputs
+                            k_prompts[head_idx] += weight * k_out
+                            v_prompts[head_idx] += weight * v_out
+
+                        except Exception as e:
+                            print(f"Warning: Error applying generator {gen_idx}: {e}")
+                            # Use original prompt as fallback
+                            k_prompts[head_idx] = head_prompt
+                            v_prompts[head_idx] = head_prompt
+            else:
+                # Fallback: use original prompts
+                k_prompts[head_idx] = batched_prompt[head_idx]
+                v_prompts[head_idx] = batched_prompt[head_idx]
+
+        # Stack k and v prompts
         kv_prompts = torch.stack([k_prompts, v_prompts], dim=0)  # [2, H, B, seq_len, head_dim]
 
-        # FIXED: Handle dimensions properly for repeat operation
-        if kv_prompts.dim() == 5:
-            # Already has the right number of dimensions
-            kv_prompts = kv_prompts.unsqueeze(4).repeat(1, 1, 1, 1, self.length,
-                                                        1)  # [2, H, B, seq_len, length, head_dim]
-            kv_prompts = kv_prompts.permute(2, 0, 4, 1, 5, 3).contiguous()  # [B, 2, length, H, head_dim, seq_len]
+        # Expand for prompt length
+        kv_prompts = kv_prompts.unsqueeze(4).repeat(1, 1, 1, 1, self.length, 1)  # [2, H, B, seq_len, length, head_dim]
 
-            # Reshape to final form
-            B, dual, length, H, head_dim, seq_len = kv_prompts.shape
-            final_prompts = kv_prompts.view(B, dual * length, H * head_dim)
-        else:
-            # Fallback: create simple prompts
-            print(f"Warning: Unexpected tensor dimensions {kv_prompts.shape}, using fallback")
-            B = batched_prompt.shape[0]
-            final_prompts = torch.zeros(B, 2 * self.length, D, device=batched_prompt.device)
+        # Rearrange to expected format
+        kv_prompts = kv_prompts.permute(2, 0, 4, 1, 5, 3)  # [B, 2, length, H, head_dim, seq_len]
+
+        # Collapse the last dimension if seq_len = 1
+        if kv_prompts.shape[-1] == 1:
+            kv_prompts = kv_prompts.squeeze(-1)  # [B, 2, length, H, head_dim]
+
+        # Final reshape
+        B, dual, length, H, head_dim = kv_prompts.shape
+        final_prompts = kv_prompts.reshape(B, dual * length, H * head_dim)
 
         return final_prompts
