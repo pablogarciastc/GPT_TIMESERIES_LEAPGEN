@@ -234,6 +234,118 @@ class LPrompt(nn.Module):
 
         return out
 
+    # Add these methods to your existing LPrompt class in promptL.py
+
+    def process_new_task(self, old_num_k, new_num_k, new_desc_embed):
+        """
+        Legacy method for backward compatibility with existing training code.
+        Maps to the new add_task method.
+        """
+        # Calculate task_id from the progression
+        current_task_id = len(self.task_boundaries)
+
+        # Determine class indices for this task
+        classes_per_task = self.num_classes // self.num_tasks
+        start_class = current_task_id * classes_per_task
+        end_class = min(start_class + classes_per_task, self.num_classes)
+        class_indices = list(range(start_class, end_class))
+
+        # Handle descriptor embeddings
+        if current_task_id == 0:
+            # First task - use new_desc_embed directly
+            desc_embed = new_desc_embed
+        else:
+            # Subsequent tasks - extract relevant descriptors
+            # new_desc_embed contains all descriptors up to current task
+            start_desc = old_num_k
+            desc_embed = new_desc_embed[start_desc:new_num_k] if len(new_desc_embed.shape) > 1 else new_desc_embed[
+                -classes_per_task:]
+
+        print(f"[LPrompt] process_new_task: task_id={current_task_id}, "
+              f"classes={class_indices}, desc_shape={desc_embed.shape}")
+
+        # Call the new method
+        self.add_task(current_task_id, class_indices, desc_embed)
+
+        # Update tracking variables for compatibility
+        self.old_num_k = old_num_k
+        self.new_num_k = new_num_k
+
+    def add_task(self, task_id, class_indices, desc_embeddings):
+        """
+        Properly register a new task with its descriptors
+        """
+        if len(class_indices) == 0:
+            print("Warning: No class indices provided for task", task_id)
+            return
+
+        start_class = min(class_indices)
+        end_class = max(class_indices) + 1
+        start_prompt = len(self.desc_embeddings)
+
+        # Ensure desc_embeddings is properly shaped
+        if desc_embeddings.dim() == 1:
+            desc_embeddings = desc_embeddings.unsqueeze(0)
+        elif desc_embeddings.dim() == 3:
+            desc_embeddings = desc_embeddings.squeeze(1)
+
+        # Project and store descriptors
+        with torch.no_grad():
+            if desc_embeddings.shape[-1] != self.text_proj[0].in_features:
+                # If already projected to embed_dim, skip projection
+                if desc_embeddings.shape[-1] == self.embed_dim:
+                    projected_desc = desc_embeddings
+                else:
+                    print(
+                        f"Warning: Descriptor dimension mismatch. Expected {self.text_proj[0].in_features}, got {desc_embeddings.shape[-1]}")
+                    # Try to handle dimension mismatch
+                    if desc_embeddings.shape[-1] < self.text_proj[0].in_features:
+                        # Pad with zeros
+                        padding = torch.zeros(desc_embeddings.shape[0],
+                                              self.text_proj[0].in_features - desc_embeddings.shape[-1],
+                                              device=desc_embeddings.device)
+                        desc_embeddings = torch.cat([desc_embeddings, padding], dim=1)
+                    else:
+                        # Truncate
+                        desc_embeddings = desc_embeddings[:, :self.text_proj[0].in_features]
+                    projected_desc = self.text_proj(desc_embeddings)
+            else:
+                projected_desc = self.text_proj(desc_embeddings)
+
+            self.desc_embeddings.append(projected_desc)
+
+        end_prompt = start_prompt + len(projected_desc)
+        self.task_boundaries.append((start_class, end_class, start_prompt, end_prompt))
+        self.current_task = max(self.current_task, task_id + 1)
+
+        print(f"[LPrompt] Added task {task_id}: classes [{start_class}:{end_class}], "
+              f"prompts [{start_prompt}:{end_prompt}], desc_shape={projected_desc.shape}")
+
+    # Also add this method to handle the missing kmax_list and lmax_list attributes
+    def init_tracking_lists(self):
+        """Initialize tracking lists for backward compatibility"""
+        if not hasattr(self, 'kmax_list'):
+            self.kmax_list = []
+        if not hasattr(self, 'lmax_list'):
+            self.lmax_list = []
+        if not hasattr(self, 'old_num_k'):
+            self.old_num_k = 0
+        if not hasattr(self, 'new_num_k'):
+            self.new_num_k = 0
+        if not hasattr(self, 'old_num_c'):
+            self.old_num_c = 0
+        if not hasattr(self, 'new_num_c'):
+            self.new_num_c = 0
+
+    # Update the __init__ method - add this at the end of __init__
+    def update_init(self):
+        """Add this call at the end of your LPrompt.__init__ method"""
+        # Initialize backward compatibility attributes
+        self.init_tracking_lists()
+
+        print(f"[LPrompt] Initialized with {self.num_classes} classes, {self.num_tasks} tasks, "
+              f"embed_dim={self.embed_dim}, max_pool_size={self.max_pool_size}")
+        
     def generate_prompts(self, batched_prompt, start_prompt, end_prompt, layer_num, weights):
         """Generate final prompts using attention generators"""
         if batched_prompt.dim() == 2:
@@ -284,3 +396,4 @@ class LPrompt(nn.Module):
         final_prompts = kv_prompts.reshape(B, dual * length, H * head_dim)
 
         return final_prompts
+
