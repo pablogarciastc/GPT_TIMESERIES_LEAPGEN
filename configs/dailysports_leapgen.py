@@ -21,7 +21,6 @@ def get_args_parser(parser):
     )
     parser.add_argument('--seq-length', default=125, type=int, help='Input sequence length for classification')
     parser.add_argument('--num-features', default=45, type=int, help='Number of input features')
-    parser.add_argument('--hidden-size', default=128, type=int, help='Hidden layer size (for LSTM/GRU, ignored by MOMENT)')
     parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
     parser.add_argument('--num-heads', default=1, type=int, help='Number of attention heads (must divide hidden-size)')
     parser.add_argument('--pretrained', default=True, help='Load pretrained MOMENT model or not')
@@ -130,7 +129,7 @@ def get_args_parser(parser):
     parser.add_argument('--intertask_coeff', default=1.0, type=float)
     parser.add_argument('--k_mul', default=50.0, type=float)
     parser.add_argument('--same_key_value', default=False, type=bool)
-    parser.add_argument('--dualopt', default=False, type=bool)
+    parser.add_argument('--dualopt', default=True, type=bool)
 
     # -------------------
     # Attribute generator / prompt parameters

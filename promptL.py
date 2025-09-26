@@ -38,6 +38,7 @@ class LPrompt(nn.Module):
         self.top_k = top_k
         self.top_k_l = top_k_l
         self.batchwise_prompt = batchwise_prompt
+        self.numclasses_per_task = int(self.num_classes / self.num_tasks)
 
         # pool size = tasks * prompts_per_task
         self.pool_size = self.num_tasks * self.prompts_per_task
@@ -139,15 +140,89 @@ class LPrompt(nn.Module):
 
         x_embed_norm = self.l2_normalize(x_embed_mean, dim=-1)
 
-        # === Similarities ===
-        prompt_key_norm = self.l2_normalize(self.prompt_key[: self.lmax_list[-1]], dim=-1)
+        # === Task prediction using prompt_key2 (for reduce_sim2) ===
+        if len(self.kmax_list) > 0:
+            prompt_key2_norm = self.l2_normalize(self.prompt_key2[0:len(self.kmax_list)], dim=-1)
+            prompt_key_norm = self.l2_normalize(self.prompt_key[0:self.lmax_list[-1]], dim=-1)
+
+            # Task-level similarity computation
+            prompt_key2_norm_allclass = torch.flatten(
+                (prompt_key2_norm.unsqueeze(1).repeat(1, self.numclasses_per_task, 1)),
+                start_dim=0, end_dim=1
+            )
+
+            sim = torch.matmul(prompt_key_norm, x_embed_norm.t()).t()
+            sim2 = torch.matmul(prompt_key2_norm_allclass, x_embed_norm.t()).t()
+            sim2 = (1000 * sim) * (1000 * sim2)
+
+            # Task prediction
+            (sim2_top_k, idx2) = torch.topk(sim2, k=1, dim=1)
+            idx2 = torch.floor(idx2 / self.numclasses_per_task).long()
+
+            if self.training:
+                idx2[0:] = task_id
+                pred_task_id = task_id
+            else:
+                pred_task_id = torch.mode(idx2.detach().clone().flatten().cpu()).values.item()
+
+            # Calculate reduce_sim2 exactly as in original (line ~95 in original)
+            batched_key2_norm = prompt_key2_norm[idx2]
+            sim2 = batched_key2_norm * x_embed_norm.unsqueeze(1)  # B, top_k, C
+            reduce_sim = torch.sum(sim2) / x_embed.shape[0]  # Scalar
+            out['reduce_sim2'] = reduce_sim  # Note: original had this variable name issue
+        else:
+            pred_task_id = 0 if task_id < 0 else task_id
+
+        # === Determine task boundaries ===
+        if len(self.kmax_list) == 0 or pred_task_id == 0:
+            sl, s = 0, 0
+            fl, f = self.numclasses_per_task, self.top_k_l
+        else:
+            # Check bounds to prevent index errors
+            if pred_task_id - 1 >= 0 and pred_task_id - 1 < len(self.lmax_list):
+                sl = self.lmax_list[pred_task_id - 1]
+            else:
+                sl = 0
+
+            if pred_task_id < len(self.lmax_list):
+                fl = self.lmax_list[pred_task_id]
+            else:
+                fl = self.lmax_list[-1] if self.lmax_list else self.numclasses_per_task
+
+            if pred_task_id - 1 >= 0 and pred_task_id - 1 < len(self.kmax_list):
+                s = self.kmax_list[pred_task_id - 1]
+            else:
+                s = 0
+
+            if pred_task_id < len(self.kmax_list):
+                f = self.kmax_list[pred_task_id]
+            else:
+                f = self.kmax_list[-1] if self.kmax_list else self.top_k_l
+
+        out['max_t'] = pred_task_id + 1
+
+        # === Class-level similarities ===
+        if self.training:
+            prompt_key = self.prompt_key[sl:fl]
+        else:
+            prompt_key = self.prompt_key[0:fl]
+
+        prompt_key_norm = self.l2_normalize(prompt_key, dim=-1)
         similarity = torch.matmul(prompt_key_norm, x_embed_norm.t()).t()
         out["similarity"] = similarity
 
-        # top-k
+        # top-k selection
         available_k = similarity.shape[1]
         actual_k = min(self.top_k_l, available_k)
         sim_top_k, idx = torch.topk(similarity, k=actual_k, dim=1)
+
+        # === Calculate reduce_sim (for main loss) ===
+        if self.training and y is not None:
+            pkey_norm = self.l2_normalize(self.prompt_key, dim=-1)
+            batched_key_norm = pkey_norm[y]
+            sim_calc = batched_key_norm * x_embed_norm  # Keep gradients for main loss
+            reduce_sim = torch.sum(sim_calc) / x_embed.shape[0]
+            out['reduce_sim'] = reduce_sim
 
         # === Construir prompts a partir de desc_embed ===
         batched_prompt_raw = torch.matmul(sim_top_k.unsqueeze(1), self.desc_embed[idx])
@@ -159,7 +234,7 @@ class LPrompt(nn.Module):
 
         # === Final prompts ===
         out["batched_prompt"] = self.compute_att_over_prompt(
-            batched_prompt_raw, self.old_num_k, self.new_num_k, layer_num, similarity
+            batched_prompt_raw, s, f, layer_num, similarity
         )
         return out
 
@@ -183,14 +258,10 @@ class LPrompt(nn.Module):
             k_prompt_head = k_prompt_layer[h].unsqueeze(1)
             v_prompt_head = v_prompt_layer[h].unsqueeze(1)
 
-            # The similarity matrix has shape [batch_size, top_k_l] and corresponds to
-            # the top-k selected prompts for the current task
             num_selected_prompts = similarity.shape[1]
 
-            # Apply attention using the available prompts and their similarities
             for i in range(num_selected_prompts):
-                prompt_idx = s + i  # Map to global prompt pool index
-                # Ensure we don't exceed the component generator bounds
+                prompt_idx = s + i
                 if prompt_idx < len(k_comp_gen):
                     new_k_prompt_layer[h] += (
                             k_comp_gen[prompt_idx](k_prompt_head).squeeze(1) * similarity[:, i].unsqueeze(1)

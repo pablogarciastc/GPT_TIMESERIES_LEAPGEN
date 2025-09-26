@@ -92,19 +92,14 @@ def train_one_epoch(model: torch.nn.Module,
         cur_targets = torch.where(target - known_classes >= 0, target - known_classes, -100)
         loss = criterion(logits[:, known_classes:], cur_targets)  # base criterion (CrossEntropyLoss)
 
-        if (hasattr(args, 'use_e_prompt') and args.use_e_prompt) or (
-                hasattr(args, 'use_g_prompt') and args.use_g_prompt):
+        if args.use_e_prompt or args.use_g_prompt:
             if task_id > 0:
                 l1_loss = 0.0
-                if hasattr(model, 'e_prompt') and hasattr(model.e_prompt, 'prompt_embed_matcher'):
-                    for old_wt, new_wt in zip(old_prompt_matcher.parameters(),
-                                              model.e_prompt.prompt_embed_matcher.parameters()):
-                        l1_loss += torch.norm(old_wt.detach() - new_wt, p=1)
-                    loss = loss + 0.01 * l1_loss
-
-                if hasattr(model, 'e_prompt') and hasattr(model.e_prompt, 'prompt'):
-                    prompt_loss = torch.norm(old_prompt.detach() - model.e_prompt.prompt, p=1)
-                    loss = loss + 0.01 * prompt_loss
+                for old_wt, new_wt in zip(old_prompt_matcher.parameters(), model.e_prompt.prompt_embed_matcher.parameters()):
+                    l1_loss += torch.norm(old_wt.detach() - new_wt, p=1)
+                loss = loss + 0.01 * l1_loss
+                prompt_loss = torch.norm(old_prompt.detach() - model.e_prompt.prompt, p=1)
+                loss = loss + 0.01 * prompt_loss
 
         acc1, acc5 = accuracy(logits, target, topk=(1, 5))
 
@@ -113,7 +108,7 @@ def train_one_epoch(model: torch.nn.Module,
             sys.exit(1)
 
         optimizer.zero_grad()
-        loss.backward(retain_graph=True)
+        loss.backward()
 
         # Fixed gradient clipping
         if hasattr(args, 'use_clip_grad') and args.use_clip_grad and max_norm > 0:
@@ -176,68 +171,61 @@ def train_one_epoch_with_aux(
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("Lr", utils.SmoothedValue(window_size=1, fmt="{value:.5f}"))
     metric_logger.add_meter("Loss", utils.SmoothedValue(window_size=1, fmt="{value:.3f}"))
+    if args.dualopt:
+        k_params = []
+        for n, p in model.named_parameters():
+            if n.find('prompt_key2') >=0:
+                k_params.append(p)
+        k_network_params = [{'params': k_params, 'lr': args.lr*args.k_mul, 'weight_decay': args.weight_decay}]
+        task_optimizer = optim.Adam(k_network_params, weight_decay=args.weight_decay)
 
     header = f"Train: Epoch[{epoch + 1}/{args.epochs}]"
 
     for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
-        input, target = input.to(device), target.to(device)
+        input = input.to(device, non_blocking=True)
+        target = target.to(device, non_blocking=True)
 
         # --- cls features from frozen original model
         cls_features = None
         if original_model is not None:
             with torch.no_grad():
                 out0 = original_model(input)
-                cls_features = out0["pre_logits"].detach().clone()  # cut graph
+                cls_features = out0["pre_logits"]
 
         # --- forward (NO reuse anything across batches)
-        out = model.forwardA1(
-            input, target, task_id=task_id,
-            cls_features=cls_features, train=set_training_mode
-        )
+        # Get the output once
+        output = model.forwardA1(input, target, task_id=task_id, cls_features=cls_features, train=set_training_mode)
+        logits = output['logits']['logits']
 
-        logits = out["logits"]["logits"]
-
-        # --- build loss fresh every time
+        # Build main loss (including reduce_sim)
         loss = args.intertask_coeff * criterion(logits, target)
-
         known_classes = task_id * len(class_mask[0])
-        cur_targets = torch.where(target - known_classes >= 0,
-                                  target - known_classes, -100)
+        cur_targets = torch.where(target - known_classes >= 0, target - known_classes, -100)
         loss += criterion(logits[:, known_classes:], cur_targets)
 
+        if args.pull_constraint and "reduce_sim" in output:
+            loss = loss - args.pull_constraint_coeff * output["reduce_sim"]
 
-        # pull constraints (detach to cut gradient accumulation)
-        if args.pull_constraint and "reduce_sim" in out:
-            loss -= args.pull_constraint_coeff * out["reduce_sim"].detach()
-
-        loss2 = 0
-        if args.pull_constraint and "reduce_sim2" in out:
-            if args.dualopt:
-                loss2 = -1 * args.pull_constraint_coeff2 * output['reduce_sim2']
-            else:
-                loss = loss - args.pull_constraint_coeff2 * output['reduce_sim2']
-
-        acc1, acc5 = accuracy(logits, target, topk=(1, 5))
-
-        if not math.isfinite(loss.item()):
-            print("Loss is {}, stopping training".format(loss.item()))
-            sys.exit(1)
-
+        # First backward pass
         optimizer.zero_grad()
-        loss.backward(retain_graph=True)
-        if args.use_clip_grad:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+        loss.backward()
         optimizer.step()
 
-        if args.dualopt:
-            task_optimizer.zero_grad()
-            loss2.backward()
-            task_optimizer.step()
+        # Separate forward pass for dual optimizer
+        if args.dualopt and args.pull_constraint:
+            output2 = model.forwardA1(input, target, task_id=task_id, cls_features=cls_features,
+                                      train=set_training_mode)
+            if "reduce_sim2" in output2 and output2["reduce_sim2"] is not None:
+                loss2 = -1 * args.pull_constraint_coeff2 * output2['reduce_sim2']
+                task_optimizer.zero_grad()
+                loss2.backward()
+                task_optimizer.step()
 
         if device.type == 'cuda':
             torch.cuda.synchronize()
         metric_logger.update(Loss=loss.item())
         metric_logger.update(Lr=optimizer.param_groups[0]["lr"])
+        acc1, acc5 = accuracy(logits, target, topk=(1, 5))
 
         metric_logger.meters['Acc@1'].update(acc1.item(), n=input.shape[0])
         metric_logger.meters['Acc@5'].update(acc5.item(), n=input.shape[0])

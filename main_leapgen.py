@@ -60,12 +60,11 @@ def main(args):
 
 
     model = create_model(
-        args.model,                     # e.g. "moment_base"
+        args.model,
         pretrained=args.pretrained,
         num_classes=args.nb_classes,
         drop_rate=args.dropout,
         drop_path_rate=0.0,
-        # Prompt + continual args are passed through
         prompt_length=args.length,
         embedding_key=args.embedding_key,
         prompt_init=args.prompt_key_init,

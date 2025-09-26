@@ -41,18 +41,11 @@ class MomentTransformerL(nn.Module):
         self.args = args
         self.num_classes = num_classes
         self.num_tasks = num_tasks
-        self.embed_dim = 128  # 🔑 fixed working dim
+        self.embed_dim = 128
 
         # === Backbone ===
-        self.backbone = MOMENTPipeline.from_pretrained(
-            "AutonLab/MOMENT-1-small",
-            model_kwargs={
-                "task_name": "embedding",
-                "n_channels": 128,
-            }
-        )
-        self.backbone.init()
-        self.classifier = nn.Linear(128, num_classes)
+        self.backbone = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-small")
+        self.input_proj = nn.Linear(self.args.num_features, self.embed_dim)
 
         # === E-Prompt ===
         self.use_e_prompt = getattr(args, "use_e_prompt", True)
@@ -76,7 +69,7 @@ class MomentTransformerL(nn.Module):
                 num_heads=args.num_heads,
                 same_key_value=same_key_value,
                 prompts_per_task=prompts_per_task,
-                text_embed_dim=768,
+                text_embed_dim=768,  # SentenceTransformer/roberta embeddings
             )
 
         # === G-Prompt (optional) ===
@@ -111,7 +104,10 @@ class MomentTransformerL(nn.Module):
               f"{num_tasks} tasks, embed_dim={self.embed_dim}")
 
     # -------------------------------------------------
-    def forward_features(self, x, task_id=-1, train=True, y=None, prompt_mask=None, cls_features=None):
+    # -------------------------------------------------
+    def forward_features(
+            self, x, task_id=-1, train=True, y=None, prompt_mask=None, cls_features=None
+    ):
         # normalize shape [B, seq, features]
         if x.dim() == 2:
             x = x.view(x.size(0), self.args.seq_length, self.args.num_features)
@@ -121,39 +117,50 @@ class MomentTransformerL(nn.Module):
         x = x.float()
         x = self.input_proj(x)  # [B, seq_len, embed_dim]
 
+        # Initialize similarity values
+        reduce_sim, reduce_sim2 = None, None
+
         # === G-Prompt ===
         if self.use_g_prompt:
-            g_out = self.g_prompt(x_embed=x, y=y, task_id=task_id,
-                                  prompt_mask=prompt_mask, layer_num=0,
-                                  cls_features=cls_features)
+            g_out = self.g_prompt(
+                x_embed=x,
+                y=y,
+                task_id=task_id,
+                prompt_mask=prompt_mask,
+                layer_num=0,
+                cls_features=cls_features,
+            )
             if "batched_prompt" in g_out:
                 g_seq = g_out["batched_prompt"]
-                if g_seq.dim() == 3:
-                    # [B, length, embed_dim]
-                    pass
-                elif g_seq.dim() == 5:
+                if g_seq.dim() == 5:
                     B, dual, length, H, D = g_seq.shape
                     g_seq = g_seq.reshape(B, dual * length, H * D)
                 x = torch.cat([g_seq, x], dim=1)
 
         # === E-Prompt ===
         if self.use_e_prompt:
-            e_out = self.e_prompt(x_embed=x, y=y, task_id=task_id,
-                                  prompt_mask=prompt_mask, layer_num=0,
-                                  cls_features=cls_features)
+            e_out = self.e_prompt(
+                x_embed=x,
+                y=y,
+                task_id=task_id,
+                prompt_mask=prompt_mask,
+                layer_num=0,
+                cls_features=cls_features,
+            )
             if "batched_prompt" in e_out:
                 e_seq = e_out["batched_prompt"]
-                if e_seq.dim() == 3:
-                    pass
-                elif e_seq.dim() == 5:
+                if e_seq.dim() == 5:
                     B, dual, length, H, D = e_seq.shape
                     e_seq = e_seq.reshape(B, dual * length, H * D)
                 x = torch.cat([e_seq, x], dim=1)
 
+            # Get similarity losses from e_prompt
+            reduce_sim = e_out.get("reduce_sim", None)
+            reduce_sim2 = e_out.get("reduce_sim2", None)
+
         # === Backbone ===
         outputs = self.backbone.forward(task_name="classification", x_enc=x)
 
-        # ✅ Extract features
         if hasattr(outputs, "reconstruction") and outputs.reconstruction is not None:
             features = outputs.reconstruction
             if features.dim() == 3:
@@ -161,24 +168,44 @@ class MomentTransformerL(nn.Module):
         elif hasattr(outputs, "logits") and outputs.logits is not None:
             features = outputs.logits
         else:
-            raise ValueError(f"[MomentTransformerL] Unexpected MOMENT output keys: {outputs.__dict__.keys()}")
+            raise ValueError(
+                f"[MomentTransformerL] Unexpected MOMENT output keys: {outputs.__dict__.keys()}"
+            )
 
-        return features
+        return {"features": features, "reduce_sim": reduce_sim, "reduce_sim2": reduce_sim2}
 
     # -------------------------------------------------
-
-    def forward(self, x):
-        x_proj = self.input_proj(x).permute(0, 2, 1)
-        out = self.backbone(x_enc=x_proj)
-        z = out.embeddings.mean(dim=1)  # pool across seq
-        return self.classifier(z)
+    def forward(self, x, task_id=-1, train=True):
+        feats_dict = self.forward_features(x, task_id=task_id, train=train)
+        feats = feats_dict["features"]
+        logits = self.head(feats)
+        return {
+            "logits": logits,
+            "pre_logits": feats,
+            "reduce_sim": feats_dict["reduce_sim"],
+            "reduce_sim2": feats_dict["reduce_sim2"],
+        }
 
     def forwardA1(self, x, target=None, task_id=-1, cls_features=None, train=True):
-        feats = self.forward_features(x, task_id=task_id, train=train, cls_features=cls_features)
+        feats_dict = self.forward_features(
+            x, task_id=task_id, train=train, y=target, cls_features=cls_features
+        )
+        feats = feats_dict["features"]
         logits = self.head(feats)
-        return {"logits": logits, "pre_logits": feats}
+        return {
+            "logits": logits,
+            "pre_logits": feats,
+            "reduce_sim": feats_dict["reduce_sim"],
+            "reduce_sim2": feats_dict["reduce_sim2"],
+        }
 
     def forward2(self, x, max_t=None):
-        feats = self.forward_features(x, task_id=-1, train=False)
+        feats_dict = self.forward_features(x, task_id=-1, train=False)
+        feats = feats_dict["features"]
         logits = self.head(feats)
-        return {"logits": logits, "pre_logits": feats}
+        return {
+            "logits": logits,
+            "pre_logits": feats,
+            "reduce_sim": feats_dict["reduce_sim"],
+            "reduce_sim2": feats_dict["reduce_sim2"],
+        }
