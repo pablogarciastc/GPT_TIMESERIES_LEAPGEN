@@ -208,7 +208,7 @@ def train_one_epoch_with_aux(
 
         # First backward pass
         optimizer.zero_grad()
-        loss.backward(retain_graph=True)
+        loss.backward()
         optimizer.step()
 
         # Separate forward pass for dual optimizer
@@ -218,7 +218,7 @@ def train_one_epoch_with_aux(
             if "reduce_sim2" in output2 and output2["reduce_sim2"] is not None:
                 loss2 = -1 * args.pull_constraint_coeff2 * output2['reduce_sim2']
                 task_optimizer.zero_grad()
-                loss2.backward(retain_graph=True)
+                loss2.backward()
                 task_optimizer.step()
 
         if device.type == 'cuda':
