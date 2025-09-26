@@ -46,7 +46,7 @@ def get_args_parser(parser):
     # Optimizer parameters
     # -------------------
     parser.add_argument('--opt', default='adam', type=str, help='Optimizer type')
-    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate (smaller for MOMENT fine-tuning)')
+    parser.add_argument('--lr', type=float, default=3e-5, help='Learning rate (smaller for MOMENT fine-tuning)')
     parser.add_argument('--weight-decay', type=float, default=0.0, help='Weight decay')
     parser.add_argument('--sched', default='cosine', choices=['none', 'cosine', 'step'], type=str, help='LR scheduler type')
     parser.add_argument('--step-size', type=int, default=10, help='Step size for step LR scheduler')
@@ -124,10 +124,10 @@ def get_args_parser(parser):
     parser.add_argument('--embedding_key', default='cls', type=str)
     parser.add_argument('--predefined_key', default='', type=str)
     parser.add_argument('--pull_constraint', default=True)
-    parser.add_argument('--pull_constraint_coeff', default=1.0, type=float)
-    parser.add_argument('--pull_constraint_coeff2', default=1.0, type=float)
-    parser.add_argument('--intertask_coeff', default=1.0, type=float)
-    parser.add_argument('--k_mul', default=50.0, type=float)
+    parser.add_argument('--pull_constraint_coeff', default=0.1, type=float)
+    parser.add_argument('--pull_constraint_coeff2', default=0.1, type=float)
+    parser.add_argument('--intertask_coeff', default=0.1, type=float)
+    parser.add_argument('--k_mul', default=25.0, type=float)
     parser.add_argument('--same_key_value', default=False, type=bool)
     parser.add_argument('--dualopt', default=True, type=bool)
 
