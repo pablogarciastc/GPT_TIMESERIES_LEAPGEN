@@ -22,7 +22,7 @@ def get_args_parser(parser):
     parser.add_argument('--seq-length', default=125, type=int, help='Input sequence length for classification')
     parser.add_argument('--num-features', default=45, type=int, help='Number of input features')
     parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
-    parser.add_argument('--num-heads', default=8, type=int, help='Number of attention heads (must divide hidden-size)')
+    parser.add_argument('--num-heads', default=1, type=int, help='Number of attention heads (must divide hidden-size)')
     parser.add_argument('--pretrained', default=True, help='Load pretrained MOMENT model or not')
     parser.add_argument('--clip-grad', type=float, default=1.0,
                         help='Clip gradient norm (default: 1.0, 0 to disable)')
