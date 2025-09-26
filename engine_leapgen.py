@@ -171,66 +171,111 @@ def train_one_epoch_with_aux(
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("Lr", utils.SmoothedValue(window_size=1, fmt="{value:.5f}"))
     metric_logger.add_meter("Loss", utils.SmoothedValue(window_size=1, fmt="{value:.3f}"))
-
-    k_params = []
-    if getattr(args, "dualopt", False):
-        for n, p in model.named_parameters():
-            if 'prompt_key2' in n:
-                k_params.append(p)
-    task_optimizer = optim.Adam(
-        [{'params': k_params, 'lr': args.lr*args.k_mul, 'weight_decay': args.weight_decay}]
-    ) if getattr(args, "dualopt", False) else None
+    metric_logger.add_meter("CE_Loss", utils.SmoothedValue(window_size=1, fmt="{value:.3f}"))
+    metric_logger.add_meter("Prompt_Loss", utils.SmoothedValue(window_size=1, fmt="{value:.3f}"))
 
     header = f"Train: Epoch[{epoch + 1}/{args.epochs}]"
-    need_second_pass = bool(getattr(args, "dualopt", False) and getattr(args, "pull_constraint", False))
 
     for inp, target in metric_logger.log_every(data_loader, args.print_freq, header):
         inp = inp.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
 
+        # Get features from original model if available
         cls_features = None
         if original_model is not None:
             with torch.no_grad():
                 out0 = original_model(inp)
                 cls_features = out0["pre_logits"]
 
+        # Forward pass
         out = model.forwardA1(inp, target, task_id=task_id, cls_features=cls_features, train=set_training_mode)
         lg_any = out['logits']
         logits = lg_any['logits'] if isinstance(lg_any, dict) else lg_any
 
-        loss = args.intertask_coeff * criterion(logits, target)
-        known_classes = task_id * len(class_mask[0])
-        cur_targets = torch.where(target - known_classes >= 0, target - known_classes, -100)
-        loss = loss + criterion(logits[:, known_classes:], cur_targets)
+        # IMPROVED LOSS COMPUTATION
+        total_loss = 0.0
 
+        # 1. Current task loss (main objective)
+        current_classes = class_mask[task_id]
+        current_start = sum(len(class_mask[i]) for i in range(task_id))
+        current_end = current_start + len(current_classes)
+
+        # Map global targets to local task targets
+        local_targets = target - current_start
+        valid_mask = (local_targets >= 0) & (local_targets < len(current_classes))
+
+        if valid_mask.sum() > 0:
+            current_logits = logits[:, current_start:current_end]
+            ce_loss = criterion(current_logits[valid_mask], local_targets[valid_mask])
+            total_loss += ce_loss
+            metric_logger.update(CE_Loss=ce_loss.item())
+
+        # 2. Replay loss for previous tasks (prevent catastrophic forgetting)
+        if task_id > 0 and args.replay_loss_weight > 0:
+            prev_end = current_start
+            if prev_end > 0:
+                prev_logits = logits[:, :prev_end]
+                # Use soft targets from original model
+                if original_model is not None:
+                    with torch.no_grad():
+                        teacher_out = original_model(inp, task_id=-1)  # All tasks
+                        teacher_logits = teacher_out['logits']
+                        if isinstance(teacher_logits, dict):
+                            teacher_logits = teacher_logits['logits']
+                        teacher_probs = F.softmax(teacher_logits[:, :prev_end] / args.temperature, dim=1)
+
+                    student_log_probs = F.log_softmax(prev_logits / args.temperature, dim=1)
+                    replay_loss = F.kl_div(student_log_probs, teacher_probs, reduction='batchmean')
+                    total_loss += args.replay_loss_weight * replay_loss
+
+        # 3. Prompt regularization losses
+        prompt_loss = 0.0
+
+        # Pull constraint (encourage prompt diversity)
         if getattr(args, "pull_constraint", False) and out.get("reduce_sim", None) is not None:
-            loss = loss - args.pull_constraint_coeff * out["reduce_sim"]
+            pull_loss = -args.pull_constraint_coeff * out["reduce_sim"]
+            prompt_loss += pull_loss
 
+        # Task-specific prompt loss
+        if out.get("reduce_sim2", None) is not None:
+            task_loss = -args.pull_constraint_coeff2 * out["reduce_sim2"]
+            prompt_loss += task_loss
+
+        # L2 regularization on prompts (prevent overfitting)
+        if hasattr(model, 'e_prompt') and args.prompt_l2_weight > 0:
+            prompt_params = []
+            for name, param in model.e_prompt.named_parameters():
+                if 'prompt_key' in name or any(gen_name in name for gen_name in ['k_comp_gen', 'v_comp_gen']):
+                    prompt_params.append(param)
+
+            if prompt_params:
+                l2_loss = sum(torch.norm(p, p=2) for p in prompt_params)
+                prompt_loss += args.prompt_l2_weight * l2_loss
+
+        total_loss += prompt_loss
+        metric_logger.update(Prompt_Loss=prompt_loss.item())
+
+        # Backward pass
         optimizer.zero_grad(set_to_none=True)
-        loss.backward(retain_graph=need_second_pass)
+        total_loss.backward()
+
         if max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-        optimizer.step()
 
-        if need_second_pass:
-            out2 = model.forwardA1(inp, target, task_id=task_id, cls_features=cls_features, train=set_training_mode)
-            if out2.get("reduce_sim2", None) is not None:
-                loss2 = -args.pull_constraint_coeff2 * out2["reduce_sim2"]
-                task_optimizer.zero_grad(set_to_none=True)
-                loss2.backward()
-                task_optimizer.step()
+        optimizer.step()
 
         if device.type == 'cuda':
             torch.cuda.synchronize()
 
-        metric_logger.update(Loss=loss.item())
+        # Logging
+        metric_logger.update(Loss=total_loss.item())
         metric_logger.update(Lr=optimizer.param_groups[0]["lr"])
+
         acc1, acc5 = accuracy(logits, target, topk=(1, 5))
         metric_logger.meters['Acc@1'].update(acc1.item(), n=inp.shape[0])
         metric_logger.meters['Acc@5'].update(acc5.item(), n=inp.shape[0])
 
     metric_logger.synchronize_between_processes()
-    logging.info("Averaged stats: {}".format(metric_logger))
     return {k: m.global_avg for k, m in metric_logger.meters.items()}
 
 
