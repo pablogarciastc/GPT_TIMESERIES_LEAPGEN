@@ -140,36 +140,20 @@ class LPrompt(nn.Module):
 
         x_embed_norm = self.l2_normalize(x_embed_mean, dim=-1)
 
-        # === Task prediction using prompt_key2 (for reduce_sim2) ===
+        prompt_key_norm = self.l2_normalize(
+            self.prompt_key[0:self.lmax_list[-1]] if len(self.lmax_list) > 0 else self.prompt_key, dim=-1)
+        sim = torch.matmul(prompt_key_norm, x_embed_norm.t()).t()
+
         if len(self.kmax_list) > 0:
-            prompt_key2_norm = self.l2_normalize(self.prompt_key2[0:len(self.kmax_list)], dim=-1)
-            prompt_key_norm = self.l2_normalize(self.prompt_key[0:self.lmax_list[-1]], dim=-1)
-
-            # Task-level similarity computation
-            prompt_key2_norm_allclass = torch.flatten(
-                (prompt_key2_norm.unsqueeze(1).repeat(1, self.numclasses_per_task, 1)),
-                start_dim=0, end_dim=1
-            )
-
-            sim = torch.matmul(prompt_key_norm, x_embed_norm.t()).t()
-            sim2 = torch.matmul(prompt_key2_norm_allclass, x_embed_norm.t()).t()
-            sim2 = (1000 * sim) * (1000 * sim2)
-
-            # Task prediction
-            (sim2_top_k, idx2) = torch.topk(sim2, k=1, dim=1)
+            pk2 = self.l2_normalize(self.prompt_key2[0:len(self.kmax_list)], dim=-1)
+            pk2_all = torch.flatten(pk2.unsqueeze(1).repeat(1, self.numclasses_per_task, 1), start_dim=0, end_dim=1)
+            sim2 = torch.matmul(pk2_all, x_embed_norm.t()).t()
+            _, idx2 = torch.topk(sim2, k=1, dim=1)
             idx2 = torch.floor(idx2 / self.numclasses_per_task).long()
-
-            if self.training:
-                idx2[0:] = task_id
-                pred_task_id = task_id
-            else:
-                pred_task_id = torch.mode(idx2.detach().clone().flatten().cpu()).values.item()
-
-            # Calculate reduce_sim2 exactly as in original (line ~95 in original)
-            batched_key2_norm = prompt_key2_norm[idx2]
-            sim2 = batched_key2_norm * x_embed_norm.unsqueeze(1)  # B, top_k, C
-            reduce_sim = torch.sum(sim2) / x_embed.shape[0]  # Scalar
-            out['reduce_sim2'] = reduce_sim  # Note: original had this variable name issue
+            pred_task_id = task_id if self.training else torch.mode(idx2.detach().clone().flatten().cpu()).values.item()
+            batched_key2_norm = pk2[idx2]
+            reduce_sim2 = torch.sum(batched_key2_norm * x_embed_norm.unsqueeze(1)) / x_embed.shape[0]
+            out['reduce_sim2'] = reduce_sim2
         else:
             pred_task_id = 0 if task_id < 0 else task_id
 
@@ -212,6 +196,11 @@ class LPrompt(nn.Module):
         out["similarity"] = similarity
 
         # top-k selection
+        available_k = similarity.shape[1]
+        actual_k = min(self.top_k_l, available_k)
+        temperature = 0.07
+        similarity = similarity / temperature
+        similarity = torch.softmax(similarity, dim=1)
         available_k = similarity.shape[1]
         actual_k = min(self.top_k_l, available_k)
         sim_top_k, idx = torch.topk(similarity, k=actual_k, dim=1)
