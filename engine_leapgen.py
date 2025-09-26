@@ -257,7 +257,7 @@ def train_one_epoch_with_aux(
 
         # Backward pass
         optimizer.zero_grad(set_to_none=True)
-        total_loss.backward()
+        total_loss.backward(retain_graph=True)
 
         if max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
