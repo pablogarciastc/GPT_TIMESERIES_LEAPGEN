@@ -165,11 +165,11 @@ class LPrompt(nn.Module):
             else:
                 pred_task_id = torch.mode(idx2.detach().clone().flatten().cpu()).values.item()
 
-            # Calculate reduce_sim2 (independent computation for dual optimization)
-            batched_key2_norm = prompt_key2_norm[idx2].detach()  # Detach to avoid shared graph
-            sim2_calc = batched_key2_norm * x_embed_norm.unsqueeze(1).detach()  # Detach here too
-            reduce_sim2 = torch.sum(sim2_calc) / x_embed.shape[0]
-            out['reduce_sim2'] = reduce_sim2
+            # Calculate reduce_sim2 exactly as in original (line ~95 in original)
+            batched_key2_norm = prompt_key2_norm[idx2]
+            sim2 = batched_key2_norm * x_embed_norm.unsqueeze(1)  # B, top_k, C
+            reduce_sim = torch.sum(sim2) / x_embed.shape[0]  # Scalar
+            out['reduce_sim2'] = reduce_sim  # Note: original had this variable name issue
         else:
             pred_task_id = 0 if task_id < 0 else task_id
 

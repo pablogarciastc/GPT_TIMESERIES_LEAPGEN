@@ -159,7 +159,6 @@ class MomentTransformerL(nn.Module):
             reduce_sim2 = e_out.get("reduce_sim2", None)
 
         # === Backbone ===
-        x.requires_grad_(True)
         outputs = self.backbone.forward(task_name="classification", x_enc=x)
         if hasattr(outputs, "reconstruction") and outputs.reconstruction is not None:
             features = outputs.reconstruction
