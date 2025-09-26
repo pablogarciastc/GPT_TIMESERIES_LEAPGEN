@@ -208,7 +208,7 @@ def train_one_epoch_with_aux(
 
         # First backward pass
         optimizer.zero_grad()
-        loss.backward()
+        loss.backward(retain_graph=True)
         optimizer.step()
 
         # Separate forward pass for dual optimizer
