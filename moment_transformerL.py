@@ -159,18 +159,19 @@ class MomentTransformerL(nn.Module):
             reduce_sim2 = e_out.get("reduce_sim2", None)
 
         # === Backbone ===
+        x.requires_grad_(True)
         outputs = self.backbone.forward(task_name="classification", x_enc=x)
-
         if hasattr(outputs, "reconstruction") and outputs.reconstruction is not None:
             features = outputs.reconstruction
             if features.dim() == 3:
                 features = features.mean(dim=1)
-        elif hasattr(outputs, "logits") and outputs.logits is not None:
-            features = outputs.logits
+        elif hasattr(outputs, "pre_logits"):
+            features = outputs.pre_logits
         else:
-            raise ValueError(
-                f"[MomentTransformerL] Unexpected MOMENT output keys: {outputs.__dict__.keys()}"
-            )
+            feats_fallback = outputs.logits
+            if feats_fallback.dim() == 3:
+                feats_fallback = feats_fallback.mean(dim=1)
+            features = feats_fallback
 
         return {"features": features, "reduce_sim": reduce_sim, "reduce_sim2": reduce_sim2}
 
