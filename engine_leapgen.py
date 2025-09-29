@@ -139,7 +139,6 @@ def train_one_epoch_with_aux(
     if args.distributed and utils.get_world_size() > 1:
         data_loader.sampler.set_epoch(epoch)
 
-
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('Lr', utils.SmoothedValue(window_size=1, fmt='{value:.5f}'))
     metric_logger.add_meter('Loss', utils.SmoothedValue(window_size=1, fmt='{value:.3f}'))
@@ -177,7 +176,7 @@ def train_one_epoch_with_aux(
 
         known_classes = task_id * len(class_mask[0])
         cur_targets = torch.where(target - known_classes >= 0, target - known_classes, -100)
-        loss += criterion(logits[:, known_classes:], cur_targets)  # base criterion (CrossEntropyLoss)
+        loss += criterion(logits[:, known_classes:], cur_targets)
 
         if args.pull_constraint and 'reduce_sim' in output:
             loss = loss - args.pull_constraint_coeff * output['reduce_sim']
@@ -187,9 +186,18 @@ def train_one_epoch_with_aux(
         if args.dualopt and 'reduce_sim2' in output:
             loss2 = -args.pull_constraint_coeff2 * output['reduce_sim2']
 
+        # Accuracy antes del backward
+        acc1, acc5 = accuracy(logits, target, topk=(1, 5))
+
+        if not math.isfinite(loss.item()):
+            print("Loss is {}, stopping training".format(loss.item()))
+            sys.exit(1)
+
         # Dos backwards separados
         optimizer.zero_grad()
         loss.backward()
+        if max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
         optimizer.step()
 
         if args.dualopt:
@@ -197,11 +205,20 @@ def train_one_epoch_with_aux(
             loss2.backward()
             task_optimizer.step()
 
+        if device.type == 'cuda':
+            torch.cuda.synchronize()
+
+        # ACTUALIZAR MÉTRICAS (esto faltaba!)
+        metric_logger.update(Loss=loss.item())
+        metric_logger.update(Lr=optimizer.param_groups[0]["lr"])
+        metric_logger.meters['Acc@1'].update(acc1.item(), n=inp.shape[0])
+        metric_logger.meters['Acc@5'].update(acc5.item(), n=inp.shape[0])
+
+    # gather the stats from all processes
     metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
     logging.info("Averaged stats: {}".format(metric_logger))
     return {k: m.global_avg for k, m in metric_logger.meters.items()}
-
-
 
 
 @torch.no_grad()
