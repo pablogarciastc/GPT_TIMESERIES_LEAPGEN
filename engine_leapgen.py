@@ -179,33 +179,20 @@ def train_one_epoch_with_aux(
         if args.pull_constraint and 'reduce_sim' in output:
             loss = loss - args.pull_constraint_coeff * output['reduce_sim']
 
+        # Segunda pérdida (solo si dualopt)
         loss2 = 0
-        if args.pull_constraint and 'reduce_sim2' in output:
-            if args.dualopt:
-                loss2 = -1 * args.pull_constraint_coeff2 * output['reduce_sim2']
-            else:
-                loss = loss - args.pull_constraint_coeff2 * output['reduce_sim2']
-            # print("Similarity : ", output['reduce_sim'].item(), " Similarity 2 : ", output['reduce_sim2'].item())
+        if args.dualopt and 'reduce_sim2' in output:
+            loss2 = -args.pull_constraint_coeff2 * output['reduce_sim2']
 
-        metric_logger.update(Loss=loss.item())
-        metric_logger.update(Lr=optimizer.param_groups[0]["lr"])
-        acc1, acc5 = accuracy(logits, target, topk=(1, 5))
-        metric_logger.meters['Acc@1'].update(acc1.item(), n=inp.shape[0])
-        metric_logger.meters['Acc@5'].update(acc5.item(), n=inp.shape[0])
-
+        # Dos backwards separados
         optimizer.zero_grad()
         loss.backward()
-        if args.use_clip_grad:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
         optimizer.step()
 
         if args.dualopt:
             task_optimizer.zero_grad()
             loss2.backward()
             task_optimizer.step()
-
-        if device.type == 'cuda':
-            torch.cuda.synchronize()
 
     metric_logger.synchronize_between_processes()
     logging.info("Averaged stats: {}".format(metric_logger))
