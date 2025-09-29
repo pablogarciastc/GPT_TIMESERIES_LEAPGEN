@@ -242,6 +242,12 @@ class LPrompt(nn.Module):
         k_prompt_list = []
         v_prompt_list = []
 
+        if batched_prompt.dim() == 2:  # [B, D]
+            B, C = batched_prompt.shape
+            head_dim = C // self.num_heads
+            batched_prompt = batched_prompt.view(B, self.num_heads, head_dim)
+
+
         k_prompt_layer = batched_prompt[0]  # B, num_heads, head_dim
         v_prompt_layer = batched_prompt[1]  # B, num_heads, head_dim
 
