@@ -166,8 +166,8 @@ def train_one_epoch_with_aux(
             else:
                 cls_features = None
 
-        out = model.forwardA1(inp, target, task_id=task_id, cls_features=cls_features, train=set_training_mode)
-        lg_any = out['logits']
+        output = model.forwardA1(inp, target, task_id=task_id, cls_features=cls_features, train=set_training_mode)
+        lg_any = output['logits']
         logits = lg_any['logits'] if isinstance(lg_any, dict) else lg_any
 
         loss = args.intertask_coeff * criterion(logits, target)
