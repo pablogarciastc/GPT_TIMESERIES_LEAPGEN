@@ -87,7 +87,6 @@ class LPrompt(nn.Module):
             f"Num Tasks: {self.num_tasks}, pool_size: {self.pool_size}, "
             f"num_classes: {self.num_classes}, top_k: {self.top_k}"
         )
-        print(self.k_comp_gen[str(0)][str(1)])
         print("Init prompt finished")
 
     def l2_normalize(self, x, dim=None, epsilon=1e-12):
