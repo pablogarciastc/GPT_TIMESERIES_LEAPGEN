@@ -174,33 +174,38 @@ def train_one_epoch_with_aux(
 
         known_classes = task_id * len(class_mask[0])
         cur_targets = torch.where(target - known_classes >= 0, target - known_classes, -100)
-        loss = loss + criterion(logits[:, known_classes:], cur_targets)
+        loss += criterion(logits[:, known_classes:], cur_targets)  # base criterion (CrossEntropyLoss)
 
         if args.pull_constraint and 'reduce_sim' in output:
             loss = loss - args.pull_constraint_coeff * output['reduce_sim']
 
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        if max_norm > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-        optimizer.step()
-
-        if args.dualopt:
-            out2 = model.forwardA1(inp, target, task_id=task_id, cls_features=cls_features, train=set_training_mode)
-            if out2.get("reduce_sim2", None) is not None:
-                loss2 = -args.pull_constraint_coeff2 * out2["reduce_sim2"]
-                task_optimizer.zero_grad(set_to_none=True)
-                loss2.backward()
-                task_optimizer.step()
-
-        if device.type == 'cuda':
-            torch.cuda.synchronize()
+        loss2 = 0
+        if args.pull_constraint and 'reduce_sim2' in output:
+            if args.dualopt:
+                loss2 = -1 * args.pull_constraint_coeff2 * output['reduce_sim2']
+            else:
+                loss = loss - args.pull_constraint_coeff2 * output['reduce_sim2']
+            # print("Similarity : ", output['reduce_sim'].item(), " Similarity 2 : ", output['reduce_sim2'].item())
 
         metric_logger.update(Loss=loss.item())
         metric_logger.update(Lr=optimizer.param_groups[0]["lr"])
         acc1, acc5 = accuracy(logits, target, topk=(1, 5))
         metric_logger.meters['Acc@1'].update(acc1.item(), n=inp.shape[0])
         metric_logger.meters['Acc@5'].update(acc5.item(), n=inp.shape[0])
+
+        optimizer.zero_grad()
+        loss.backward()
+        if args.use_clip_grad:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+        optimizer.step()
+
+        if args.dualopt:
+            task_optimizer.zero_grad()
+            loss2.backward()
+            task_optimizer.step()
+
+        if device.type == 'cuda':
+            torch.cuda.synchronize()
 
     metric_logger.synchronize_between_processes()
     logging.info("Averaged stats: {}".format(metric_logger))
