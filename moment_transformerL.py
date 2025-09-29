@@ -227,12 +227,16 @@ class MomentTransformerL(nn.Module):
         res = dict()
         reduce_sim, reduce_sim2 = None, None
 
+        # Store initial x_embed for output (similar to VisionTransformer)
+        x_embed_norm = None
+
         # Simplified prompt mask (similar to Vision Transformer A1 version)
         prompt_mask = None
 
         # === E-Prompt Processing (layer-by-layer similar to VisionTransformerA1) ===
         if self.use_e_prompt:
             last_e_prompt = None
+            batched_prompt_list = []  # Store prompts for output
 
             # Process each layer that has e-prompts
             for layer_idx, layer_num in enumerate(self.e_prompt_layer_idx):
@@ -245,8 +249,23 @@ class MomentTransformerL(nn.Module):
                     cls_features=cls_features,
                 )
 
+                # Store intermediate results from first layer
+                if layer_idx == 0:
+                    if "prompt_key_norm" in e_out:
+                        res["prompt_key_norm"] = e_out["prompt_key_norm"]
+                    if "similarity" in e_out:
+                        res["similarity"] = e_out["similarity"]
+                    if "x_embed_norm" in e_out:
+                        x_embed_norm = e_out["x_embed_norm"]
+                    if "max_t" in e_out:
+                        res["max_t"] = e_out["max_t"]
+
                 if "batched_prompt" in e_out:
                     e_seq = e_out["batched_prompt"]
+
+                    # Store the batched prompt
+                    batched_prompt_list.append(e_seq)
+
                     if e_seq.dim() == 5:
                         B, dual, length, H, D = e_seq.shape
                         e_seq = e_seq.reshape(B, dual * length, H * D)
@@ -255,6 +274,8 @@ class MomentTransformerL(nn.Module):
                     if "desc_embed" in e_out:
                         desc_embed = e_out["desc_embed"].unsqueeze(1)
                         x = torch.cat((x, desc_embed), dim=1)
+                        # Store desc_embed for output
+                        res["desc_embed"] = e_out["desc_embed"]
 
                     # Handle prefix tuning with prompt accumulation (like Vision Transformer A1)
                     if self.use_prefix_tune_for_e_prompt:
@@ -277,25 +298,45 @@ class MomentTransformerL(nn.Module):
                     reduce_sim = e_out.get("reduce_sim", None)
                     reduce_sim2 = e_out.get("reduce_sim2", None)
 
+            # Stack all batched prompts if we have any
+            if batched_prompt_list:
+                # Concatenate along batch dimension or keep the last one
+                # depending on what VisionTransformer does
+                res["batched_prompt"] = batched_prompt_list[-1]  # or stack them
+
         # === Backbone Forward Pass ===
         outputs = self.backbone.forward(task_name="classification", x_enc=x)
+
+        # Extract features but keep full sequence representation
         if hasattr(outputs, "reconstruction") and outputs.reconstruction is not None:
-            features = outputs.reconstruction
-            if features.dim() == 3:
-                features = features.mean(dim=1)
+            features_seq = outputs.reconstruction  # Keep 3D: [B, seq, embed_dim]
+            if features_seq.dim() == 3:
+                features_pooled = features_seq.mean(dim=1)  # [B, embed_dim]
+            else:
+                features_pooled = features_seq
+                features_seq = features_seq.unsqueeze(1)
         elif hasattr(outputs, "pre_logits"):
-            features = outputs.pre_logits
+            features_pooled = outputs.pre_logits
+            features_seq = features_pooled.unsqueeze(1)
         else:
             feats_fallback = outputs.logits
             if feats_fallback.dim() == 3:
-                feats_fallback = feats_fallback.mean(dim=1)
-            features = feats_fallback
+                features_seq = feats_fallback
+                features_pooled = feats_fallback.mean(dim=1)
+            else:
+                features_pooled = feats_fallback
+                features_seq = feats_fallback.unsqueeze(1)
 
+        # Update results with all outputs (similar to VisionTransformer structure)
         res.update({
-            "x": features,
+            "x": features_seq,  # Full sequence like VisionTransformer [B, seq, embed_dim]
             "reduce_sim": reduce_sim,
             "reduce_sim2": reduce_sim2
         })
+
+        # Add x_embed_norm if we have it
+        if x_embed_norm is not None:
+            res["x_embed_norm"] = x_embed_norm
 
         return res
 
