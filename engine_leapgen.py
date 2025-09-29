@@ -12,34 +12,18 @@
 """
 Train and eval functions used in main.py - Modified for MOMENT compatibility
 """
+import random
 import math
 import sys
-import os
-import datetime
-import json
 import time
 from typing import Iterable
-from pathlib import Path
-
 import torch
-import torch.nn.functional as F
 from torch import optim
 import numpy as np
-from torch.nn import MSELoss
-
 from timm.utils import accuracy
-from timm.optim import create_optimizer
-import copy
 import utils
-from torch.distributions.multivariate_normal import MultivariateNormal
+from attribute_matching import get_descriptors_embedding1
 import logging
-
-# for attribute matching of tasks
-from attribute_matching import num_new_prompts, get_descriptors_embedding1
-from timm.scheduler import create_scheduler
-
-# import clip
-import random
 
 
 # from kan import *
@@ -63,14 +47,14 @@ def train_one_epoch(model: torch.nn.Module,
                 if name.find('.{}.weight'.format(i)) >= 0 or name.find('.{}.bias'.format(i)) >= 0:
                     param.requires_grad = False
 
-    if hasattr(args, 'distributed') and args.distributed and utils.get_world_size() > 1:
+    if args.distributed and utils.get_world_size() > 1:
         data_loader.sampler.set_epoch(epoch)
 
     metric_logger = utils.MetricLogger(delimiter="  ")
 
     # metric_logger.add_meter('Lr_head', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
 
-    if hasattr(args, 'SLCA') and args.SLCA:
+    if args.SLCA:
         metric_logger.add_meter('Lr_cls', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
         metric_logger.add_meter('Lr_rps', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     else:
@@ -110,19 +94,14 @@ def train_one_epoch(model: torch.nn.Module,
         optimizer.zero_grad()
         loss.backward()
 
-        # Fixed gradient clipping
-        if hasattr(args, 'use_clip_grad') and args.use_clip_grad and max_norm > 0:
+        if args.use_clip_grad:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-        elif max_norm > 0:  # Fallback if use_clip_grad not in args
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-
         optimizer.step()
 
         if device.type == 'cuda':
             torch.cuda.synchronize()
         metric_logger.update(Loss=loss.item())
-
-        if hasattr(args, 'SLCA') and args.SLCA:
+        if args.SLCA:
             metric_logger.update(Lr_cls=optimizer.param_groups[0]["lr"])
             metric_logger.update(Lr_rps=optimizer.param_groups[1]["lr"])
         else:
@@ -138,25 +117,6 @@ def train_one_epoch(model: torch.nn.Module,
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-import math
-import sys
-import os
-import datetime
-import json
-import time
-from typing import Iterable
-from pathlib import Path
-
-import torch
-import torch.nn.functional as F
-from torch import optim
-import numpy as np
-
-from timm.utils import accuracy
-import utils
-from attribute_matching import get_descriptors_embedding1
-import logging
-import copy
 
 
 def train_one_epoch_with_aux(
@@ -168,114 +128,82 @@ def train_one_epoch_with_aux(
 ):
     model.train(set_training_mode)
 
+    s = old_num_k
+
+    for name, param in model.named_parameters():
+        if name.find('e_prompt.v_conv_vals') >=0  or name.find('e_prompt.k_conv_vals') >=0:
+            for i in range(s):
+                if name.find('.{}.weight'.format(i)) >=0 or name.find('.{}.bias'.format(i)) >=0:
+                    param.requires_grad = False
+
+    if args.distributed and utils.get_world_size() > 1:
+        data_loader.sampler.set_epoch(epoch)
+
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("Lr", utils.SmoothedValue(window_size=1, fmt="{value:.5f}"))
     metric_logger.add_meter("Loss", utils.SmoothedValue(window_size=1, fmt="{value:.3f}"))
-    metric_logger.add_meter("CE_Loss", utils.SmoothedValue(window_size=1, fmt="{value:.3f}"))
-    metric_logger.add_meter("Prompt_Loss", utils.SmoothedValue(window_size=1, fmt="{value:.3f}"))
+
+    k_params = []
+    if args.dualopt:
+        for n, p in model.named_parameters():
+            if 'prompt_key2' in n:
+                k_params.append(p)
+        task_optimizer = optim.Adam(
+            [{'params': k_params, 'lr': args.lr*args.k_mul, 'weight_decay': args.weight_decay}]
+        )
 
     header = f"Train: Epoch[{epoch + 1}/{args.epochs}]"
 
     for inp, target in metric_logger.log_every(data_loader, args.print_freq, header):
+
         inp = inp.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
 
-        # Get features from original model if available
-        cls_features = None
-        if original_model is not None:
-            with torch.no_grad():
-                out0 = original_model(inp)
-                cls_features = out0["pre_logits"]
+        with torch.no_grad():
+            if original_model is not None:
+                output = original_model(inp)
+                cls_features = output['pre_logits']
+            else:
+                cls_features = None
 
-        # Forward pass
         out = model.forwardA1(inp, target, task_id=task_id, cls_features=cls_features, train=set_training_mode)
         lg_any = out['logits']
         logits = lg_any['logits'] if isinstance(lg_any, dict) else lg_any
 
-        # IMPROVED LOSS COMPUTATION
-        total_loss = 0.0
+        loss = args.intertask_coeff * criterion(logits, target)
 
-        # 1. Current task loss (main objective)
-        current_classes = class_mask[task_id]
-        current_start = sum(len(class_mask[i]) for i in range(task_id))
-        current_end = current_start + len(current_classes)
+        known_classes = task_id * len(class_mask[0])
+        cur_targets = torch.where(target - known_classes >= 0, target - known_classes, -100)
+        loss = loss + criterion(logits[:, known_classes:], cur_targets)
 
-        # Map global targets to local task targets
-        local_targets = target - current_start
-        valid_mask = (local_targets >= 0) & (local_targets < len(current_classes))
+        if args.pull_constraint and 'reduce_sim' in output:
+            loss = loss - args.pull_constraint_coeff * output['reduce_sim']
 
-        if valid_mask.sum() > 0:
-            current_logits = logits[:, current_start:current_end]
-            ce_loss = criterion(current_logits[valid_mask], local_targets[valid_mask])
-            total_loss += ce_loss
-            metric_logger.update(CE_Loss=ce_loss.item())
-
-        # 2. Replay loss for previous tasks (prevent catastrophic forgetting)
-        if task_id > 0 and args.replay_loss_weight > 0:
-            prev_end = current_start
-            if prev_end > 0:
-                prev_logits = logits[:, :prev_end]
-                # Use soft targets from original model
-                if original_model is not None:
-                    with torch.no_grad():
-                        teacher_out = original_model(inp, task_id=-1)  # All tasks
-                        teacher_logits = teacher_out['logits']
-                        if isinstance(teacher_logits, dict):
-                            teacher_logits = teacher_logits['logits']
-                        teacher_probs = F.softmax(teacher_logits[:, :prev_end] / args.temperature, dim=1)
-
-                    student_log_probs = F.log_softmax(prev_logits / args.temperature, dim=1)
-                    replay_loss = F.kl_div(student_log_probs, teacher_probs, reduction='batchmean')
-                    total_loss += args.replay_loss_weight * replay_loss
-
-        # 3. Prompt regularization losses
-        prompt_loss = 0.0
-
-        # Pull constraint (encourage prompt diversity)
-        if getattr(args, "pull_constraint", False) and out.get("reduce_sim", None) is not None:
-            pull_loss = -args.pull_constraint_coeff * out["reduce_sim"]
-            prompt_loss += pull_loss
-
-        # Task-specific prompt loss
-        if out.get("reduce_sim2", None) is not None:
-            task_loss = -args.pull_constraint_coeff2 * out["reduce_sim2"]
-            prompt_loss += task_loss
-
-        # L2 regularization on prompts (prevent overfitting)
-        if hasattr(model, 'e_prompt') and args.prompt_l2_weight > 0:
-            prompt_params = []
-            for name, param in model.e_prompt.named_parameters():
-                if 'prompt_key' in name or any(gen_name in name for gen_name in ['k_comp_gen', 'v_comp_gen']):
-                    prompt_params.append(param)
-
-            if prompt_params:
-                l2_loss = sum(torch.norm(p, p=2) for p in prompt_params)
-                prompt_loss += args.prompt_l2_weight * l2_loss
-
-        total_loss += prompt_loss
-        metric_logger.update(Prompt_Loss=prompt_loss.item())
-
-        # Backward pass
         optimizer.zero_grad(set_to_none=True)
-        total_loss.backward(retain_graph=True)
-
+        loss.backward()
         if max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-
         optimizer.step()
+
+        if args.dualopt:
+            out2 = model.forwardA1(inp, target, task_id=task_id, cls_features=cls_features, train=set_training_mode)
+            if out2.get("reduce_sim2", None) is not None:
+                loss2 = -args.pull_constraint_coeff2 * out2["reduce_sim2"]
+                task_optimizer.zero_grad(set_to_none=True)
+                loss2.backward()
+                task_optimizer.step()
 
         if device.type == 'cuda':
             torch.cuda.synchronize()
 
-        # Logging
-        metric_logger.update(Loss=total_loss.item())
+        metric_logger.update(Loss=loss.item())
         metric_logger.update(Lr=optimizer.param_groups[0]["lr"])
-
         acc1, acc5 = accuracy(logits, target, topk=(1, 5))
         metric_logger.meters['Acc@1'].update(acc1.item(), n=inp.shape[0])
         metric_logger.meters['Acc@5'].update(acc5.item(), n=inp.shape[0])
 
     metric_logger.synchronize_between_processes()
+    logging.info("Averaged stats: {}".format(metric_logger))
     return {k: m.global_avg for k, m in metric_logger.meters.items()}
 
 
@@ -356,7 +284,7 @@ def evaluate_with_aux(model: torch.nn.Module, original_model: torch.nn.Module, d
             lg_any = output['logits']
             logits = lg_any['logits'] if isinstance(lg_any, dict) else lg_any
 
-            if hasattr(args, 'task_inc') and args.task_inc and class_mask is not None:
+            if args.task_inc and class_mask is not None:
                 mask = class_mask[task_id]
                 mask = torch.tensor(mask, dtype=torch.int64).to(device)
                 logits_mask = torch.ones_like(logits, device=device) * float('-inf')
