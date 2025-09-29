@@ -139,9 +139,12 @@ def train_one_epoch_with_aux(
     if args.distributed and utils.get_world_size() > 1:
         data_loader.sampler.set_epoch(epoch)
 
+
     metric_logger = utils.MetricLogger(delimiter="  ")
-    metric_logger.add_meter("Lr", utils.SmoothedValue(window_size=1, fmt="{value:.5f}"))
-    metric_logger.add_meter("Loss", utils.SmoothedValue(window_size=1, fmt="{value:.3f}"))
+    metric_logger.add_meter('Lr', utils.SmoothedValue(window_size=1, fmt='{value:.5f}'))
+    metric_logger.add_meter('Loss', utils.SmoothedValue(window_size=1, fmt='{value:.3f}'))
+    metric_logger.add_meter('Acc@1', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    metric_logger.add_meter('Acc@5', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
 
     k_params = []
     if args.dualopt:
