@@ -54,7 +54,7 @@ def main(args):
         num_classes=args.nb_classes,
         drop_rate=args.dropout,
         drop_path_rate=0.0,
-        args=args
+        num_features = args.num_features
     )
 
 

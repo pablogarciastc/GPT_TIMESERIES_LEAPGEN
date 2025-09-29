@@ -25,7 +25,7 @@ class LPrompt(nn.Module):
             num_heads=8,
             same_key_value=False,
             prompts_per_task=5,
-            text_embed_dim=768,
+            text_embed_dim=128,
     ):
         super().__init__()
         self.length = length

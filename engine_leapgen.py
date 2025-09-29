@@ -164,6 +164,7 @@ def train_one_epoch_with_aux(
         with torch.no_grad():
             if original_model is not None:
                 output = original_model(inp)
+                print("ALREADY HERE")
                 cls_features = output['pre_logits']
             else:
                 cls_features = None
@@ -438,36 +439,83 @@ def train_and_evaluate(model, original_model, criterion, data_loader, lr_schedul
     for task_id in range(args.num_tasks):
         print(f"\n=== Task {task_id} ===")
 
-        # --- generar embeddings de descriptores
-        new_desc = torch.stack(get_descriptors_embedding1(class_mask, task_id, args)).to(device)
-        aux_desc_emb = new_desc if task_id == 0 else torch.cat((aux_desc_emb, new_desc), dim=0)
-
+        if task_id == 0:
+            aux_desc_emb = torch.stack(get_descriptors_embedding1(class_mask,task_id,args)).to(device)
+        else:
+            new_desc = torch.stack(get_descriptors_embedding1(class_mask,task_id,args)).to(device)
+            aux_desc_emb = torch.cat((aux_desc_emb, new_desc),dim=0)
         # --- actualizar la cabeza de clasificación para la nueva tarea
         if task_id > 0:
             model.head.update(len(class_mask[task_id]))
 
-        # --- registrar prompts para nueva tarea EN AMBOS MODELOS
-        if args.use_e_prompt:
-            curr_num_k = args.top_k_l
+        if task_id>0:
+            model.head.update(len(class_mask[task_id]))
+            # model.add_new_head()
+        print(model.head)
 
-            if task_id == 0:
-                model.e_prompt.process_new_task(0, curr_num_k, new_desc)
-                # SINCRONIZAR original_model
-                if original_model is not None:
-                    original_model.e_prompt.process_new_task(0, curr_num_k, new_desc)
+        not_n_params = []
+        n_params = []
+        k_params = []
+
+        lrate_decay = 0.1
+        param_list = list(model.parameters())
+        if task_id:
+            if args.dualopt:
+                for n, p in model.named_parameters():
+                    if n.find('prompt_key2') >=0:
+                        pass
+                    elif n.find('norm1')>=0 or n.find('norm2') >= 0 or n.startswith('norm') or n.find('fc_norm') >= 0:
+                        n_params.append(p)
+                    else:
+                        not_n_params.append(p)
+
             else:
-                model.e_prompt.process_new_task(old_num_k, old_num_k + curr_num_k, aux_desc_emb)
-                # SINCRONIZAR original_model
-                if original_model is not None:
-                    original_model.e_prompt.process_new_task(old_num_k, old_num_k + curr_num_k, aux_desc_emb)
+                for n, p in model.named_parameters():
+                    if n.find('norm1')>=0 or n.find('norm2') >= 0 or n.startswith('norm') or n.find('fc_norm') >= 0:
+                        n_params.append(p)
+                    else:
+                        not_n_params.append(p)
+
+            network_params = [{'params': not_n_params, 'lr': args.lr, 'weight_decay': args.weight_decay},
+                             {'params': n_params, 'lr': 0.005*args.lr, 'weight_decay': args.weight_decay}]
+            # network_params = [{'params': not_n_params, 'lr': args.lr, 'weight_decay': args.weight_decay}]
+        else:
+            if args.dualopt:
+                for n, p in model.named_parameters():
+                    if n.find('prompt_key2') >=0:
+                        pass
+                    else:
+                        not_n_params.append(p)
+                network_params = [{'params': not_n_params, 'lr': args.lr, 'weight_decay': args.weight_decay}]
+            else:
+                network_params = [{'params': param_list, 'lr': args.lr, 'weight_decay': args.weight_decay}]
+
+
+
+        # if not args.SLCA:
+        print("Using adam optimizer")
+        print("Reinitialising optimizer")
+        optimizer = optim.Adam(network_params, weight_decay=args.weight_decay)
+        if args.sched != 'constant':
+            lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=0.0000)
+
+        elif args.sched == 'constant':
+            lr_scheduler = None
+
+
+        if args.use_e_prompt or args.use_g_prompt:
+            curr_num_k = args.top_k_l
+            model.e_prompt.process_new_task(old_num_k, old_num_k + curr_num_k, aux_desc_emb)
         else:
             curr_num_k = 0
 
-        # --- reinicializar optimizador
-        main_params = [p for n, p in model.named_parameters() if 'prompt_key2' not in n]
-        optimizer = optim.Adam(main_params, lr=args.lr, weight_decay=args.weight_decay)
-        lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs,
-                                                            eta_min=1e-6) if args.sched != "constant" else None
+        old_prompt_matcher = None
+        old_prompt = None
+
+        if task_id > 5:
+            tr_epochs = args.epochs+5
+        else:
+            tr_epochs = args.epochs
 
         # --- entrenamiento
         for epoch in range(args.epochs):

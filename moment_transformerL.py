@@ -18,43 +18,47 @@ _logger = logging.getLogger(__name__)
 class MomentTransformerL(nn.Module):
     def __init__(
             self,
-            num_classes=18,
-            prompt_length=5,
-            embedding_key='mean',
-            prompt_init='uniform',
-            prompt_pool=True,
-            prompt_key=True,
-            pool_size=None,
-            num_tasks=6,
-            top_k=1,
-            top_k_l=3,
-            batchwise_prompt=False,
-            prompt_key_init='uniform',
-            e_prompt_layer_idx=[0],
-            use_prefix_tune_for_e_prompt=True,
-            same_key_value=False,
-            prompts_per_task=5,
-            head_type='token',
-            use_prompt_mask=False,
-            args=None,
-            **kwargs
+        pretrained_cfg = None,
+        num_classes = 1000,
+        drop_rate = 0.,
+        drop_path_rate = 0.,
+        prompt_length = None,
+        embedding_key = 'cls',
+        prompt_init = 'uniform',
+        prompt_pool = False,
+        prompt_key=False, pool_size=None,
+        num_tasks=6,
+        top_k=None, top_k_l=None, batchwise_prompt=False, prompt_key_init='uniform', head_type='token',
+        use_prompt_mask=False,
+        use_g_prompt=False,
+        num_heads = 12,
+        g_prompt_length=None,
+        g_prompt_layer_idx=None,
+        use_prefix_tune_for_g_prompt=False,
+        use_e_prompt=False, e_prompt_layer_idx=None, use_prefix_tune_for_e_prompt=False, same_key_value=False,
+        prompts_per_task=5,num_features=45,**kwargs
     ):
         super().__init__()
 
-        self.args = args
         self.num_classes = num_classes
         self.num_tasks = num_tasks
-        self.embed_dim = 128
+        self.embed_dim = 768
         self.head_type = head_type
         self.use_prompt_mask = use_prompt_mask
         self.prompt_pool = prompt_pool
+        self.num_classes = num_classes
+        self.num_tasks = num_tasks
+        self.grad_checkpointing = False
+        self.use_multihead=True
+        self.num_features = num_features
+        self.num_heads = num_heads
 
         # === Backbone ===
         self.backbone = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-small")
-        self.input_proj = nn.Linear(self.args.num_features, self.embed_dim)
+        self.input_proj = nn.Linear(num_features, self.embed_dim)
 
         # === E-Prompt ===
-        self.use_e_prompt = getattr(args, "use_e_prompt", True)
+        self.use_e_prompt = use_e_prompt
         self.e_prompt_layer_idx = e_prompt_layer_idx
         num_e_prompt = len(self.e_prompt_layer_idx) if self.e_prompt_layer_idx is not None else 0
         self.use_prefix_tune_for_e_prompt = use_prefix_tune_for_e_prompt
@@ -76,14 +80,14 @@ class MomentTransformerL(nn.Module):
                 prompt_key_init=prompt_key_init,
                 num_layers=num_e_prompt,
                 use_prefix_tune_for_e_prompt=use_prefix_tune_for_e_prompt,
-                num_heads=args.num_heads,
+                num_heads=num_heads,
                 same_key_value=same_key_value,
                 prompts_per_task=prompts_per_task,
-                text_embed_dim=768,  # SentenceTransformer/roberta embeddings
+                text_embed_dim=128,  # SentenceTransformer/roberta embeddings
             )
 
         # === G-Prompt (optional) ===
-        self.use_g_prompt = getattr(args, "use_g_prompt", False)
+        self.use_g_prompt = use_g_prompt
         if self.use_g_prompt:
             self.g_prompt = LPrompt(
                 length=prompt_length,
@@ -101,10 +105,10 @@ class MomentTransformerL(nn.Module):
                 prompt_key_init=prompt_key_init,
                 num_layers=1,
                 use_prefix_tune_for_e_prompt=False,
-                num_heads=args.num_heads,
+                num_heads=num_heads,
                 same_key_value=same_key_value,
                 prompts_per_task=prompts_per_task,
-                text_embed_dim=768,
+                text_embed_dim=128,
             )
 
         # Calculate total prompt length for head processing
@@ -122,8 +126,8 @@ class MomentTransformerL(nn.Module):
     def forward_features(self, x, task_id=-1, train=True, y=None, prompt_mask=None, cls_features=None):
         # Normalize shape [B, seq, features]
         if x.dim() == 2:
-            x = x.view(x.size(0), self.args.seq_length, self.args.num_features)
-        elif x.shape[1] == self.args.num_features and x.shape[2] == self.args.seq_length:
+            x = x.view(x.size(0), self.backbone.seq_len, self.num_features)
+        elif x.shape[1] == self.num_features and x.shape[2] == self.backbone.seq_len:
             x = x.permute(0, 2, 1)
 
         x = x.float()
@@ -217,8 +221,8 @@ class MomentTransformerL(nn.Module):
     def forward_featuresA1(self, x, task_id=-1, train=True, y=None, prompt_mask=None, cls_features=None):
         # Normalize shape [B, seq, features]
         if x.dim() == 2:
-            x = x.view(x.size(0), self.args.seq_length, self.args.num_features)
-        elif x.shape[1] == self.args.num_features and x.shape[2] == self.args.seq_length:
+            x = x.view(x.size(0), self.backbone.seq_len, self.num_features)
+        elif x.shape[1] == self.num_features and x.shape[2] == self.backbone.seq_len:
             x = x.permute(0, 2, 1)
 
         x = x.float()
