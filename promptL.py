@@ -239,40 +239,39 @@ class LPrompt(nn.Module):
         return out
 
     def compute_att_over_prompt(self, batched_prompt, s, f, layer_num, similarity):
-        """AtenciÃ³n sobre prompts seleccionados."""
-        if batched_prompt.dim() == 2:  # [B, D]
-            B, C = batched_prompt.shape
-            head_dim = C // self.num_heads
-            batched_prompt = batched_prompt.view(B, self.num_heads, head_dim)
+        k_prompt_list = []
+        v_prompt_list = []
 
-        k_prompt_layer = batched_prompt.permute(1, 0, 2)
-        v_prompt_layer = batched_prompt.permute(1, 0, 2)
+        k_prompt_layer = batched_prompt[0]  # B, num_heads, head_dim
+        v_prompt_layer = batched_prompt[1]  # B, num_heads, head_dim
 
+        k_prompt_layer = k_prompt_layer.permute(1, 0, 2)  # num_heads, B,head_dim
+        v_prompt_layer = v_prompt_layer.permute(1, 0, 2)  # num_heads, B,head_dim
+
+        # n_heads, batch_size, length,  head_dim = k_prompt_layer.shape
         n_heads, batch_size, head_dim = k_prompt_layer.shape
+
         new_k_prompt_layer = torch.zeros((n_heads, batch_size, head_dim), device=k_prompt_layer.device)
         new_v_prompt_layer = torch.zeros((n_heads, batch_size, head_dim), device=v_prompt_layer.device)
 
         for h in range(self.num_heads):
             k_comp_gen = self.k_comp_gen[str(layer_num)][str(h)]
             v_comp_gen = self.v_comp_gen[str(layer_num)][str(h)]
-            k_prompt_head = k_prompt_layer[h].unsqueeze(1)
-            v_prompt_head = v_prompt_layer[h].unsqueeze(1)
 
-            num_selected_prompts = similarity.shape[1]
+            k_prompt_head = k_prompt_layer[h].unsqueeze(1)  # B, 1, head_dim
+            v_prompt_head = v_prompt_layer[h].unsqueeze(1)  # B, 1, head_dim
 
-            for i in range(num_selected_prompts):
-                prompt_idx = s + i
-                if prompt_idx < len(k_comp_gen):
-                    new_k_prompt_layer[h] += (
-                            k_comp_gen[prompt_idx](k_prompt_head).squeeze(1) * similarity[:, i].unsqueeze(1)
-                    )
-                    new_v_prompt_layer[h] += (
-                            v_comp_gen[prompt_idx](v_prompt_head).squeeze(1) * similarity[:, i].unsqueeze(1)
-                    )
+            for p in range(s, f):
+                k_comp_val = k_comp_gen[p]
+                v_comp_val = v_comp_gen[p]
 
-        new_batched_prompt = torch.stack([new_k_prompt_layer, new_v_prompt_layer], dim=0)
-        new_batched_prompt = new_batched_prompt.unsqueeze(3).repeat(1, 1, 1, self.length, 1)
-        new_batched_prompt = new_batched_prompt.permute(2, 0, 3, 1, 4)
-        B, dual, length, H, D = new_batched_prompt.shape
-        new_batched_prompt = new_batched_prompt.reshape(B, dual * length, H * D)
+                new_k_prompt_layer[h] += k_comp_val(k_prompt_head).squeeze(1) * similarity[:, p - s].unsqueeze(1)
+                new_v_prompt_layer[h] += v_comp_val(v_prompt_head).squeeze(1) * similarity[:, p - s].unsqueeze(1)
+
+        new_batched_prompt = torch.stack([new_k_prompt_layer, new_v_prompt_layer],
+                                         dim=0)  # dual, num_heads, B, head_dim
+        new_batched_prompt = new_batched_prompt.unsqueeze(3).repeat(1, 1, 1, self.length,
+                                                                    1)  # dual, num_heads, B, length, head_dim
+        new_batched_prompt = new_batched_prompt.permute(2, 0, 3, 1, 4)  # B, dual, length, num_heads, head_dim
+
         return new_batched_prompt
