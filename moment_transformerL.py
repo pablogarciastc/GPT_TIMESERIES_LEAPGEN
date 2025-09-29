@@ -166,6 +166,7 @@ class MomentTransformerL(nn.Module):
             for layer_idx, layer_num in enumerate(self.e_prompt_layer_idx):
                 e_out = self.e_prompt(
                     x_embed=x,
+                    y=y,
                     task_id=task_id,
                     prompt_mask=prompt_mask,
                     layer_num=layer_idx,
