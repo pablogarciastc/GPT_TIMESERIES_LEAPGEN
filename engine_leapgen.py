@@ -117,23 +117,21 @@ def train_one_epoch(model: torch.nn.Module,
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-
-
 def train_one_epoch_with_aux(
-    model, original_model, criterion, data_loader, aux_desc_emb,
-    device, epoch, max_norm=0, optimizer=None,
-    old_prompt_matcher=None, old_prompt=None,
-    set_training_mode=True, task_id=-1, class_mask=None, args=None,
-    old_num_k=5,
+        model, original_model, criterion, data_loader, aux_desc_emb,
+        device, epoch, max_norm=0, optimizer=None,
+        old_prompt_matcher=None, old_prompt=None,
+        set_training_mode=True, task_id=-1, class_mask=None, args=None,
+        old_num_k=5,
 ):
     model.train(set_training_mode)
 
     s = old_num_k
 
     for name, param in model.named_parameters():
-        if name.find('e_prompt.v_conv_vals') >=0  or name.find('e_prompt.k_conv_vals') >=0:
+        if name.find('e_prompt.v_conv_vals') >= 0 or name.find('e_prompt.k_conv_vals') >= 0:
             for i in range(s):
-                if name.find('.{}.weight'.format(i)) >=0 or name.find('.{}.bias'.format(i)) >=0:
+                if name.find('.{}.weight'.format(i)) >= 0 or name.find('.{}.bias'.format(i)) >= 0:
                     param.requires_grad = False
 
     if args.distributed and utils.get_world_size() > 1:
@@ -149,7 +147,7 @@ def train_one_epoch_with_aux(
             if 'prompt_key2' in n:
                 k_params.append(p)
         task_optimizer = optim.Adam(
-            [{'params': k_params, 'lr': args.lr*args.k_mul, 'weight_decay': args.weight_decay}]
+            [{'params': k_params, 'lr': args.lr * args.k_mul, 'weight_decay': args.weight_decay}]
         )
 
     header = f"Train: Epoch[{epoch + 1}/{args.epochs}]"
@@ -166,26 +164,41 @@ def train_one_epoch_with_aux(
             else:
                 cls_features = None
 
+        # UN SOLO FORWARD PASS
         output = model.forwardA1(inp, target, task_id=task_id, cls_features=cls_features, train=set_training_mode)
         lg_any = output['logits']
         logits = lg_any['logits'] if isinstance(lg_any, dict) else lg_any
 
+        # Calcular pérdida principal
         loss = args.intertask_coeff * criterion(logits, target)
 
         known_classes = task_id * len(class_mask[0])
         cur_targets = torch.where(target - known_classes >= 0, target - known_classes, -100)
-        loss += criterion(logits[:, known_classes:], cur_targets)  # base criterion (CrossEntropyLoss)
+        loss = loss + criterion(logits[:, known_classes:], cur_targets)
 
         if args.pull_constraint and 'reduce_sim' in output:
             loss = loss - args.pull_constraint_coeff * output['reduce_sim']
 
-        loss2 = 0
-        if args.pull_constraint and 'reduce_sim2' in output:
-            if args.dualopt:
-                loss2 = -1 * args.pull_constraint_coeff2 * output['reduce_sim2']
-            else:
-                loss = loss - args.pull_constraint_coeff2 * output['reduce_sim2']
-            # print("Similarity : ", output['reduce_sim'].item(), " Similarity 2 : ", output['reduce_sim2'].item())
+        # Añadir reduce_sim2 a la pérdida total si dualopt está activado
+        if args.dualopt and output.get("reduce_sim2", None) is not None:
+            loss = loss - args.pull_constraint_coeff2 * output["reduce_sim2"]
+
+        # UN SOLO BACKWARD para todas las pérdidas combinadas
+        optimizer.zero_grad(set_to_none=True)
+        if args.dualopt:
+            task_optimizer.zero_grad(set_to_none=True)
+
+        loss.backward()
+
+        if max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+
+        optimizer.step()
+        if args.dualopt:
+            task_optimizer.step()
+
+        if device.type == 'cuda':
+            torch.cuda.synchronize()
 
         metric_logger.update(Loss=loss.item())
         metric_logger.update(Lr=optimizer.param_groups[0]["lr"])
@@ -193,24 +206,9 @@ def train_one_epoch_with_aux(
         metric_logger.meters['Acc@1'].update(acc1.item(), n=inp.shape[0])
         metric_logger.meters['Acc@5'].update(acc5.item(), n=inp.shape[0])
 
-        optimizer.zero_grad()
-        loss.backward()
-        if args.use_clip_grad:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-        optimizer.step()
-
-        if args.dualopt:
-            task_optimizer.zero_grad()
-            loss2.backward()
-            task_optimizer.step()
-
-        if device.type == 'cuda':
-            torch.cuda.synchronize()
-
     metric_logger.synchronize_between_processes()
     logging.info("Averaged stats: {}".format(metric_logger))
     return {k: m.global_avg for k, m in metric_logger.meters.items()}
-
 
 
 
