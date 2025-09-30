@@ -228,6 +228,10 @@ class MomentTransformerL(nn.Module):
         x = x.float()
         x = self.input_proj(x)  # [B, seq_len, embed_dim]
 
+        # IMPORTANTE: Asegurar que x está en el dispositivo correcto
+        device = next(self.backbone.parameters()).device
+        x = x.to(device)
+
         # Apply MOMENT's initial processing (using pretrained weights)
         x = self.backbone.normalizer(x)
         x = self.backbone.patch_embedding(x)
@@ -350,6 +354,7 @@ class MomentTransformerL(nn.Module):
             res["x_embed_norm"] = x_embed_norm
 
         return res
+    
     def forward_head(self, res, device, pre_logits=False):
         x = res["x"]
 
