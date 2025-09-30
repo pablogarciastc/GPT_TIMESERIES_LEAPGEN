@@ -5,7 +5,7 @@ def get_args_parser(parser):
     # -------------------
     # Training parameters
     # -------------------
-    parser.add_argument('--batch-size', default=8, type=int, help='Batch size per device')
+    parser.add_argument('--batch-size', default=1, type=int, help='Batch size per device')
     parser.add_argument('--epochs', default=50, type=int, help='Number of training epochs')
     parser.add_argument('--pin-mem', action='store_false',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
