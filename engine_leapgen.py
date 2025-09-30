@@ -164,7 +164,6 @@ def train_one_epoch_with_aux(
         with torch.no_grad():
             if original_model is not None:
                 output = original_model(inp)
-                print("ALREADY HERE")
                 cls_features = output['pre_logits']
             else:
                 cls_features = None
