@@ -18,43 +18,46 @@ _logger = logging.getLogger(__name__)
 class MomentTransformerL(nn.Module):
     def __init__(
             self,
-        pretrained_cfg = None,
-        num_classes = 1000,
-        drop_rate = 0.,
-        drop_path_rate = 0.,
-        prompt_length = None,
-        embedding_key = 'cls',
-        prompt_init = 'uniform',
-        prompt_pool = False,
-        prompt_key=False, pool_size=None,
-        num_tasks=6,
-        top_k=None, top_k_l=None, batchwise_prompt=False, prompt_key_init='uniform', head_type='token',
-        use_prompt_mask=False,
-        use_g_prompt=False,
-        num_heads = 12,
-        g_prompt_length=None,
-        g_prompt_layer_idx=None,
-        use_prefix_tune_for_g_prompt=False,
-        use_e_prompt=False, e_prompt_layer_idx=None, use_prefix_tune_for_e_prompt=False, same_key_value=False,
-        prompts_per_task=5,num_features=45,**kwargs
+            pretrained_cfg=None,
+            num_classes=1000,
+            drop_rate=0.,
+            drop_path_rate=0.,
+            prompt_length=None,
+            embedding_key='cls',
+            prompt_init='uniform',
+            prompt_pool=False,
+            prompt_key=False, pool_size=None,
+            num_tasks=6,
+            top_k=None, top_k_l=None, batchwise_prompt=False, prompt_key_init='uniform', head_type='token',
+            use_prompt_mask=False,
+            use_g_prompt=False,
+            num_heads=12,
+            g_prompt_length=None,
+            g_prompt_layer_idx=None,
+            use_prefix_tune_for_g_prompt=False,
+            use_e_prompt=False, e_prompt_layer_idx=None, use_prefix_tune_for_e_prompt=False, same_key_value=False,
+            prompts_per_task=5, num_features=45, **kwargs
     ):
         super().__init__()
 
         self.num_classes = num_classes
         self.num_tasks = num_tasks
-        self.embed_dim = 768
-        self.head_type = head_type
-        self.use_prompt_mask = use_prompt_mask
-        self.prompt_pool = prompt_pool
-        self.num_classes = num_classes
-        self.num_tasks = num_tasks
-        self.grad_checkpointing = False
-        self.use_multihead=True
-        self.num_features = num_features
-        self.num_heads = num_heads
 
         # === Backbone ===
         self.backbone = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-small")
+
+        # CAMBIO CRÍTICO: Usar la dimensión que MOMENT espera
+        self.embed_dim = self.backbone.encoder.config.d_model  # En lugar de hardcodear 768
+
+        self.head_type = head_type
+        self.use_prompt_mask = use_prompt_mask
+        self.prompt_pool = prompt_pool
+        self.grad_checkpointing = False
+        self.use_multihead = True
+        self.num_features = num_features
+        self.num_heads = num_heads
+
+        # Proyectar desde tus features a la dimensión de MOMENT
         self.input_proj = nn.Linear(num_features, self.embed_dim)
 
         # === E-Prompt ===
@@ -66,7 +69,7 @@ class MomentTransformerL(nn.Module):
         if self.use_e_prompt:
             self.e_prompt = LPrompt(
                 length=prompt_length,
-                embed_dim=self.embed_dim,
+                embed_dim=self.embed_dim,  # Ahora usa la dimensión correcta
                 num_tasks=num_tasks,
                 num_classes=num_classes,
                 embedding_key=embedding_key,
@@ -83,7 +86,7 @@ class MomentTransformerL(nn.Module):
                 num_heads=num_heads,
                 same_key_value=same_key_value,
                 prompts_per_task=prompts_per_task,
-                text_embed_dim=128,  # SentenceTransformer/roberta embeddings
+                text_embed_dim=128,
             )
 
         # === G-Prompt (optional) ===
@@ -91,7 +94,7 @@ class MomentTransformerL(nn.Module):
         if self.use_g_prompt:
             self.g_prompt = LPrompt(
                 length=prompt_length,
-                embed_dim=self.embed_dim,
+                embed_dim=self.embed_dim,  # Ahora usa la dimensión correcta
                 num_tasks=num_tasks,
                 num_classes=num_classes,
                 embedding_key=embedding_key,
@@ -314,11 +317,11 @@ class MomentTransformerL(nn.Module):
 
                             # Concatenate accumulated prompt
                             x = torch.cat([ne_prompt, x], dim=1)
-                            x = block(x)
+                            x = block(x)[0]
                         else:
                             # For prompt tuning, concatenate prompts to sequence
                             x = torch.cat([e_seq, x], dim=1)
-                            x = block(x)
+                            x = block(x)[0]
 
                     # Accumulate similarity losses
                     if reduce_sim is None:
@@ -327,7 +330,7 @@ class MomentTransformerL(nn.Module):
 
                 else:
                     # Block without prompts
-                    x = block(x)
+                    x = block(x)[0]
 
             # Store last batched prompt if we have any
             if batched_prompt_list:
@@ -339,7 +342,7 @@ class MomentTransformerL(nn.Module):
         else:
             # No prompts - just iterate through blocks normally
             for block in encoder_blocks:
-                x = block(x)
+                x = block(x)[0]
             x = self.backbone.encoder.final_layer_norm(x)
 
         # Apply head if exists
