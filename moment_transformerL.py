@@ -226,15 +226,22 @@ class MomentTransformerL(nn.Module):
             x = x.permute(0, 2, 1)
 
         x = x.float()
-        x = self.input_proj(x)  # [B, seq_len, embed_dim]
 
-        # IMPORTANTE: Asegurar que x está en el dispositivo correcto
-        device = next(self.backbone.parameters()).device
+        # Get device from model parameters
+        device = next(self.parameters()).device
         x = x.to(device)
 
-        # Apply MOMENT's initial processing (using pretrained weights)
-        x = self.backbone.normalizer(x)
-        x = self.backbone.patch_embedding(x)
+        x = self.input_proj(x)  # [B, seq_len, embed_dim]
+
+        # EN LUGAR DE LLAMAR normalizer y patch_embedding directamente,
+        # usa el método encode del backbone que maneja los dispositivos correctamente
+        # O simplemente salta esas capas y empieza desde el encoder
+
+        # Opción 1: Usar el método público que maneja dispositivos
+        # x_encoded = self.backbone.model.embedder(x)  # Si existe
+
+        # Opción 2: Saltar normalizer y patch_embedding (ya proyectaste con input_proj)
+        # y empezar directamente en el encoder
 
         # Initialize results dictionary
         res = dict()
@@ -244,7 +251,7 @@ class MomentTransformerL(nn.Module):
         # Simplified prompt mask
         prompt_mask = None
 
-        # Access MOMENT's encoder blocks
+        # Access MOMENT's encoder blocks directly
         encoder_blocks = self.backbone.encoder.block
 
         if self.use_e_prompt:
@@ -354,7 +361,6 @@ class MomentTransformerL(nn.Module):
             res["x_embed_norm"] = x_embed_norm
 
         return res
-    
     def forward_head(self, res, device, pre_logits=False):
         x = res["x"]
 
