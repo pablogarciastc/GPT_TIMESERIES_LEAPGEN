@@ -135,7 +135,7 @@ class LPrompt(nn.Module):
                     # for k in range(self.top_k_l):
                     for k in range(self.old_num_k - self.top_k_l, self.old_num_k):
                         k_comp = Gen_Attention2(int(self.embed_dim / self.num_heads), 1, False, 0., 0.).cuda()
-                        # k_comp = nn.Conv1d(1, 1, 3, stride=1, padding=1).cuda()
+                        # k_comp = nn.Conv1d(1, 1, 3, stride=1, padding=1).cudae_promp()
                         self.k_comp_gen[str(i)][str(j)].append(k_comp)
 
                         v_comp = Gen_Attention2(int(self.embed_dim / self.num_heads), 1, False, 0., 0.).cuda()
