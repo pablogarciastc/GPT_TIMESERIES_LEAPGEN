@@ -18,46 +18,43 @@ _logger = logging.getLogger(__name__)
 class MomentTransformerL(nn.Module):
     def __init__(
             self,
-            pretrained_cfg=None,
-            num_classes=1000,
-            drop_rate=0.,
-            drop_path_rate=0.,
-            prompt_length=None,
-            embedding_key='cls',
-            prompt_init='uniform',
-            prompt_pool=False,
-            prompt_key=False, pool_size=None,
-            num_tasks=6,
-            top_k=None, top_k_l=None, batchwise_prompt=False, prompt_key_init='uniform', head_type='token',
-            use_prompt_mask=False,
-            use_g_prompt=False,
-            num_heads=12,
-            g_prompt_length=None,
-            g_prompt_layer_idx=None,
-            use_prefix_tune_for_g_prompt=False,
-            use_e_prompt=False, e_prompt_layer_idx=None, use_prefix_tune_for_e_prompt=False, same_key_value=False,
-            prompts_per_task=5, num_features=45, **kwargs
+        pretrained_cfg = None,
+        num_classes = 1000,
+        drop_rate = 0.,
+        drop_path_rate = 0.,
+        prompt_length = None,
+        embedding_key = 'cls',
+        prompt_init = 'uniform',
+        prompt_pool = False,
+        prompt_key=False, pool_size=None,
+        num_tasks=6,
+        top_k=None, top_k_l=None, batchwise_prompt=False, prompt_key_init='uniform', head_type='token',
+        use_prompt_mask=False,
+        use_g_prompt=False,
+        num_heads = 12,
+        g_prompt_length=None,
+        g_prompt_layer_idx=None,
+        use_prefix_tune_for_g_prompt=False,
+        use_e_prompt=False, e_prompt_layer_idx=None, use_prefix_tune_for_e_prompt=False, same_key_value=False,
+        prompts_per_task=5,num_features=45,**kwargs
     ):
         super().__init__()
 
         self.num_classes = num_classes
         self.num_tasks = num_tasks
-
-        # === Backbone ===
-        self.backbone = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-small")
-
-        # CAMBIO CRÍTICO: Usar la dimensión que MOMENT espera
-        self.embed_dim = self.backbone.encoder.config.d_model  # En lugar de hardcodear 768
-
+        self.embed_dim = 768
         self.head_type = head_type
         self.use_prompt_mask = use_prompt_mask
         self.prompt_pool = prompt_pool
+        self.num_classes = num_classes
+        self.num_tasks = num_tasks
         self.grad_checkpointing = False
-        self.use_multihead = True
+        self.use_multihead=True
         self.num_features = num_features
         self.num_heads = num_heads
 
-        # Proyectar desde tus features a la dimensión de MOMENT
+        # === Backbone ===
+        self.backbone = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-small")
         self.input_proj = nn.Linear(num_features, self.embed_dim)
 
         # === E-Prompt ===
@@ -69,7 +66,7 @@ class MomentTransformerL(nn.Module):
         if self.use_e_prompt:
             self.e_prompt = LPrompt(
                 length=prompt_length,
-                embed_dim=self.embed_dim,  # Ahora usa la dimensión correcta
+                embed_dim=self.embed_dim,
                 num_tasks=num_tasks,
                 num_classes=num_classes,
                 embedding_key=embedding_key,
@@ -86,7 +83,7 @@ class MomentTransformerL(nn.Module):
                 num_heads=num_heads,
                 same_key_value=same_key_value,
                 prompts_per_task=prompts_per_task,
-                text_embed_dim=128,
+                text_embed_dim=128,  # SentenceTransformer/roberta embeddings
             )
 
         # === G-Prompt (optional) ===
@@ -94,7 +91,7 @@ class MomentTransformerL(nn.Module):
         if self.use_g_prompt:
             self.g_prompt = LPrompt(
                 length=prompt_length,
-                embed_dim=self.embed_dim,  # Ahora usa la dimensión correcta
+                embed_dim=self.embed_dim,
                 num_tasks=num_tasks,
                 num_classes=num_classes,
                 embedding_key=embedding_key,
@@ -229,132 +226,115 @@ class MomentTransformerL(nn.Module):
             x = x.permute(0, 2, 1)
 
         x = x.float()
-
-        # Get device from model parameters
-        device = next(self.parameters()).device
-        x = x.to(device)
-
         x = self.input_proj(x)  # [B, seq_len, embed_dim]
-
-        # EN LUGAR DE LLAMAR normalizer y patch_embedding directamente,
-        # usa el método encode del backbone que maneja los dispositivos correctamente
-        # O simplemente salta esas capas y empieza desde el encoder
-
-        # Opción 1: Usar el método público que maneja dispositivos
-        # x_encoded = self.backbone.model.embedder(x)  # Si existe
-
-        # Opción 2: Saltar normalizer y patch_embedding (ya proyectaste con input_proj)
-        # y empezar directamente en el encoder
 
         # Initialize results dictionary
         res = dict()
         reduce_sim, reduce_sim2 = None, None
+
+        # Store initial x_embed for output (similar to VisionTransformer)
         x_embed_norm = None
 
-        # Simplified prompt mask
+        # Simplified prompt mask (similar to Vision Transformer A1 version)
         prompt_mask = None
 
-        # Access MOMENT's encoder blocks directly
-        encoder_blocks = self.backbone.encoder.block
-
+        # === E-Prompt Processing (layer-by-layer similar to VisionTransformerA1) ===
         if self.use_e_prompt:
             last_e_prompt = None
-            batched_prompt_list = []
-            e_prompt_counter = -1
+            batched_prompt_list = []  # Store prompts for output
 
-            # Iterate over each transformer block
-            for i, block in enumerate(encoder_blocks):
+            # Process each layer that has e-prompts
+            for layer_idx, layer_num in enumerate(self.e_prompt_layer_idx):
+                e_out = self.e_prompt(
+                    x_embed=x,
+                    y=y,
+                    task_id=task_id,
+                    prompt_mask=prompt_mask,
+                    layer_num=layer_idx,
+                    cls_features=cls_features,
+                )
 
-                if i in self.e_prompt_layer_idx:
-                    e_prompt_counter += 1
+                # Store intermediate results from first layer
+                if layer_idx == 0:
+                    if "prompt_key_norm" in e_out:
+                        res["prompt_key_norm"] = e_out["prompt_key_norm"]
+                    if "similarity" in e_out:
+                        res["similarity"] = e_out["similarity"]
+                    if "x_embed_norm" in e_out:
+                        x_embed_norm = e_out["x_embed_norm"]
+                    if "max_t" in e_out:
+                        res["max_t"] = e_out["max_t"]
 
-                    # Generate prompt for this specific layer
-                    e_out = self.e_prompt(
-                        x_embed=x,
-                        y=y,
-                        task_id=task_id,
-                        prompt_mask=prompt_mask,
-                        layer_num=e_prompt_counter,
-                        cls_features=cls_features if cls_features is not None else x.mean(dim=1)
-                    )
+                if "batched_prompt" in e_out:
+                    e_seq = e_out["batched_prompt"]
 
-                    # Store intermediate results from first layer
-                    if e_prompt_counter == 0:
-                        if "prompt_key_norm" in e_out:
-                            res["prompt_key_norm"] = e_out["prompt_key_norm"]
-                        if "similarity" in e_out:
-                            res["similarity"] = e_out["similarity"]
-                        if "x_embed_norm" in e_out:
-                            x_embed_norm = e_out["x_embed_norm"]
-                        if "max_t" in e_out:
-                            res["max_t"] = e_out["max_t"]
+                    # Store the batched prompt
+                    batched_prompt_list.append(e_seq)
 
-                    if "batched_prompt" in e_out:
-                        e_seq = e_out["batched_prompt"]
+                    if e_seq.dim() == 5:
+                        B, dual, length, H, D = e_seq.shape
+                        e_seq = e_seq.reshape(B, dual * length, H * D)
 
-                        # Store the batched prompt
-                        batched_prompt_list.append(e_seq)
+                    # Add description embedding if available (like Vision Transformer A1)
+                    if "desc_embed" in e_out:
+                        desc_embed = e_out["desc_embed"].unsqueeze(1)
+                        x = torch.cat((x, desc_embed), dim=1)
+                        # Store desc_embed for output
+                        res["desc_embed"] = e_out["desc_embed"]
 
-                        if e_seq.dim() == 5:
-                            B, dual, length, H, D = e_seq.shape
-                            e_seq = e_seq.reshape(B, dual * length, H * D)
-
-                        # Add description embedding if available
-                        if "desc_embed" in e_out:
-                            desc_embed = e_out["desc_embed"].unsqueeze(1)
-                            x = torch.cat((x, desc_embed), dim=1)
-                            res["desc_embed"] = e_out["desc_embed"]
-
-                        # Handle prefix tuning with prompt accumulation
-                        if self.use_prefix_tune_for_e_prompt:
-                            if e_prompt_counter > 0 and last_e_prompt is not None:
-                                ne_prompt = e_seq + last_e_prompt
-                            else:
-                                ne_prompt = e_seq
-
-                            # Store for next layer
-                            last_e_prompt = e_seq
-
-                            # Concatenate accumulated prompt
-                            x = torch.cat([ne_prompt, x], dim=1)
-                            x = block(x)[0]
+                    # Handle prefix tuning with prompt accumulation (like Vision Transformer A1)
+                    if self.use_prefix_tune_for_e_prompt:
+                        if layer_idx > 0 and last_e_prompt is not None:
+                            ne_prompt = e_seq + last_e_prompt
                         else:
-                            # For prompt tuning, concatenate prompts to sequence
-                            x = torch.cat([e_seq, x], dim=1)
-                            x = block(x)[0]
+                            ne_prompt = e_seq
 
-                    # Accumulate similarity losses
-                    if reduce_sim is None:
-                        reduce_sim = e_out.get("reduce_sim", None)
-                        reduce_sim2 = e_out.get("reduce_sim2", None)
+                        # Store for next layer
+                        last_e_prompt = e_seq
 
-                else:
-                    # Block without prompts
-                    x = block(x)[0]
+                        # Concatenate accumulated prompt
+                        x = torch.cat([ne_prompt, x], dim=1)
+                    else:
+                        # For prompt tuning, concatenate prompts to sequence
+                        x = torch.cat([e_seq, x], dim=1)
 
-            # Store last batched prompt if we have any
+                # Accumulate similarity losses
+                if reduce_sim is None:
+                    reduce_sim = e_out.get("reduce_sim", None)
+                    reduce_sim2 = e_out.get("reduce_sim2", None)
+
+            # Stack all batched prompts if we have any
             if batched_prompt_list:
-                res["batched_prompt"] = batched_prompt_list[-1]
+                # Concatenate along batch dimension or keep the last one
+                # depending on what VisionTransformer does
+                res["batched_prompt"] = batched_prompt_list[-1]  # or stack them
 
-            # Apply final layer norm from encoder
-            x = self.backbone.encoder.final_layer_norm(x)
+        # === Backbone Forward Pass ===
+        outputs = self.backbone.forward(task_name="classification", x_enc=x)
 
+        # Extract features but keep full sequence representation
+        if hasattr(outputs, "reconstruction") and outputs.reconstruction is not None:
+            features_seq = outputs.reconstruction  # Keep 3D: [B, seq, embed_dim]
+            if features_seq.dim() == 3:
+                features_pooled = features_seq.mean(dim=1)  # [B, embed_dim]
+            else:
+                features_pooled = features_seq
+                features_seq = features_seq.unsqueeze(1)
+        elif hasattr(outputs, "pre_logits"):
+            features_pooled = outputs.pre_logits
+            features_seq = features_pooled.unsqueeze(1)
         else:
-            # No prompts - just iterate through blocks normally
-            for block in encoder_blocks:
-                x = block(x)[0]
-            x = self.backbone.encoder.final_layer_norm(x)
+            feats_fallback = outputs.logits
+            if feats_fallback.dim() == 3:
+                features_seq = feats_fallback
+                features_pooled = feats_fallback.mean(dim=1)
+            else:
+                features_pooled = feats_fallback
+                features_seq = feats_fallback.unsqueeze(1)
 
-        # Apply head if exists
-        if hasattr(self.backbone, 'head') and self.backbone.head is not None:
-            x = self.backbone.head(x)
-
-        # Keep sequence representation like VisionTransformer
-        features_seq = x  # [B, seq, embed_dim]
-
-        # Update results with all outputs
+        # Update results with all outputs (similar to VisionTransformer structure)
         res.update({
-            "x": features_seq,
+            "x": features_seq,  # Full sequence like VisionTransformer [B, seq, embed_dim]
             "reduce_sim": reduce_sim,
             "reduce_sim2": reduce_sim2
         })
@@ -364,6 +344,7 @@ class MomentTransformerL(nn.Module):
             res["x_embed_norm"] = x_embed_norm
 
         return res
+
     def forward_head(self, res, device, pre_logits=False):
         x = res["x"]
 

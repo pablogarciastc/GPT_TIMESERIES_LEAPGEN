@@ -28,6 +28,10 @@ warnings.filterwarnings(
 )
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+from torch.utils.checkpoint import checkpoint as _ckp
+import torch.utils.checkpoint as cp
+from functools import partial
+cp.checkpoint = partial(_ckp, use_reentrant=False)
 
 
 def main(args):

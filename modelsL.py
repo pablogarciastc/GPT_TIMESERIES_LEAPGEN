@@ -2,7 +2,7 @@
 # MOMENT backbone registration
 # ------------------------------------------
 from timm.models.registry import register_model
-from moment_transformerL import MomentTransformerL
+from moment_transformerL_funcional import MomentTransformerL
 
 
 @register_model
