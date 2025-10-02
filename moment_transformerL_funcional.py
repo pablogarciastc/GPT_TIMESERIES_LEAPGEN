@@ -54,6 +54,7 @@ class MomentTransformerL(nn.Module):
         self.num_heads = num_heads
         self.embed_proj = nn.Linear(768, 512)
         self.prompt_proj = nn.Linear(64, 512)
+
         # === Backbone ===
         self.backbone = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-small")
         self._disable_gc()
@@ -111,6 +112,9 @@ class MomentTransformerL(nn.Module):
                 prompts_per_task=prompts_per_task,
                 text_embed_dim=128,
             )
+        self.g_prompt_layer_idx = g_prompt_layer_idx
+        self.use_prefix_tune_for_g_prompt = use_prefix_tune_for_g_prompt
+
 
         # Calculate total prompt length for head processing
         self.total_prompt_len = 0
