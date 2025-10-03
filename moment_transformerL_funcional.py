@@ -222,7 +222,7 @@ class MomentTransformerL(nn.Module):
 
         return res
 
-    
+
     def forward_featuresA1(self, x, task_id=-1, train=True, y=None, prompt_mask=None, cls_features=None):
         if x.dim() == 2:
             x = x.view(x.size(0), self.backbone.seq_len, self.num_features)

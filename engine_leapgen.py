@@ -224,7 +224,7 @@ def evaluate(model, data_loader, device, task_id=-1, class_mask=None, args=None)
 
     for input, target in metric_logger.log_every(data_loader, args.print_freq, header):
         input, target = input.to(device), target.to(device)
-        out = model(input, task_id=task_id)
+        out = model.forwardA1(input, target=None, task_id=task_id, cls_features=None, train=False)
         logits = out["logits"]
 
         if args.task_inc and class_mask is not None:
