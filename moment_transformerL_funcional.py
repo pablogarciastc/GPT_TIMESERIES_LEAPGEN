@@ -165,60 +165,70 @@ class MomentTransformerL(nn.Module):
 
         res = dict()
 
-        if self.use_e_prompt or self.use_g_prompt:
-            prompt_mask = None
-            e_prompt_counter = -1
-            last_e_prompt = None
+        is_projected = False
 
-            for i, block in enumerate(self.backbone.encoder.block):
-                if i in self.e_prompt_layer_idx:
-                    e_prompt_counter += 1
 
-                    # Get cls_features for prompt selection
-                    cls_features = x[:, 0] if x.dim() == 3 else None
+        if self.grad_checkpointing and not torch.jit.is_scripting():
+            x = checkpoint_seq(self.backbone.encoder.block, x)
+        else:
+            ## FIXME MUst be use_e_prompt too?
+            if self.use_g_prompt:
+                if self.use_prompt_mask and train:
+                    start = task_id * self.e_prompt.top_k
+                    end = (task_id + 1) * self.e_prompt.top_k
+                    single_prompt_mask = torch.arange(start, end).to(x.device)
+                    prompt_mask = single_prompt_mask.unsqueeze(0).expand(x.shape[0], -1)
+                    if end > self.e_prompt.pool_size:
+                        prompt_mask = None
+                else:
+                    prompt_mask = None
 
-                    res = self.e_prompt(
-                        x,
-                        y=None,  # No labels during inference
-                        task_id=task_id,
-                        prompt_mask=prompt_mask,
-                        layer_num=e_prompt_counter,
-                        cls_features=cls_features
-                    )
+                g_prompt_counter = -1
+                e_prompt_counter = -1
+                last_e_prompt = None
 
-                    e_prompt = res['batched_prompt']
-
-                    if self.use_prefix_tune_for_e_prompt:
-                        # Prefix tuning mode
-                        if e_prompt_counter > 0 and last_e_prompt is not None:
-                            ne_prompt = e_prompt + last_e_prompt
+                for i, block in enumerate(self.backbone.encoder.block):
+                    if i in self.g_prompt_layer_idx:
+                        if self.use_prefix_tune_for_g_prompt:
+                            e_prompt_counter += 1
+                            idx = torch.tensor([g_prompt_counter] * x.shape[0]).to(x.device)
+                            g_prompt = self.g_prompt[idx]
                         else:
-                            ne_prompt = e_prompt
+                            g_prompt= None
+                        x = block(x, prompt=g_prompt)[0]
 
-                        # Reshape for prefix tuning: [B, dual, length, num_heads, head_dim]
-                        ne_prompt = ne_prompt.reshape(ne_prompt.shape[0], -1, ne_prompt.shape[-1])
+                        e_prompt = res['batched_prompt']
+                        desc_embed = res['desc_embed'].unsqueeze(1)  # [B, 1, 768]
 
-                        x = block(x, prompt=ne_prompt)[0]
+                    elif i in self.e_prompt_layer_idx:
+                        e_prompt_counter += 1
+                        res = self.e_prompt(x, task_id=task_id, prompt_mask=prompt_mask, layer_num=e_prompt_counter,
+                                            cls_features=x[:, 0])
+                        e_prompt = res['batched_prompt']
+
+                        if self.use_prefix_tune_for_e_prompt:
+                            if e_prompt_counter > 0:
+                                ne_prompt = e_prompt + last_e_prompt
+                            else:
+                                ne_prompt = e_prompt
+                            x = block(x, prompt=ne_prompt)[0]
+
+                        else:
+                            # Pommpt tunning, [B, top_k * e_prompt_length, embed_dim]
+                            prompt = e_prompt[e_prompt_counter]
+                            x = torch.cat([prompt, x], dim=1)
+                            x = block(x)[0]
+                        last_e_prompt = e_prompt
                     else:
-                        # Prompt pool mode - prepend prompts to sequence
-                        prompt = e_prompt[e_prompt_counter]
-                        x = torch.cat([prompt, x], dim=1)
                         x = block(x)[0]
 
-                    last_e_prompt = e_prompt
                 else:
-                    x = block(x)[0]
-        else:
-            # No prompting - just use backbone
-            out = self.backbone.forward(task_name="classification", x_enc=x)
-            if out.logits is not None:
-                x = out.logits
-            elif hasattr(out, 'reconstruction') and out.reconstruction is not None:
-                x = out.reconstruction
-            res = dict()
+                    out = self.backbone.forward(task_name="classification", x_enc=x)
+                    x = out.logits
+                    res = dict()
 
-        x = self.final_norm(x)
-        res['x'] = x
+            x = self.final_norm(x)
+            res['x'] = x
 
         return res
 
@@ -238,22 +248,33 @@ class MomentTransformerL(nn.Module):
             e_prompt_counter = -1
             last_e_prompt = None
 
+            # Proyectar a 512D una sola vez al principio
+            x = self.embed_proj(x)  # [B, seq_len, 512]
+
             for i, block in enumerate(self.backbone.encoder.block):
                 if i in self.e_prompt_layer_idx:
                     e_prompt_counter += 1
 
-                    # Llamar a e_prompt con x en 768D
-                    res = self.e_prompt(x, y, task_id=task_id, prompt_mask=prompt_mask, layer_num=e_prompt_counter,
-                                        cls_features=cls_features)
+                    # Proyectar temporalmente de vuelta a 768D para e_prompt
+                    x_768 = self.back_proj(x)  # [B, seq_len, 768]
+
+                    # cls_features también necesita estar en 768D si existe
+                    cls_features_768 = None
+                    if cls_features is not None:
+                        if cls_features.dim() == 2 and cls_features.shape[1] == 512:
+                            cls_features_768 = self.back_proj(cls_features.unsqueeze(1)).squeeze(1)
+                        else:
+                            cls_features_768 = cls_features
+
+                    res = self.e_prompt(x_768, y, task_id=task_id, prompt_mask=prompt_mask,
+                                        layer_num=e_prompt_counter, cls_features=cls_features_768)
 
                     e_prompt = res['batched_prompt']
                     desc_embed = res['desc_embed'].unsqueeze(1)  # [B, 1, 768]
 
                     if self.use_prefix_tune_for_e_prompt:
-                        # Proyectar a 512D solo para el block
-                        x_proj = self.embed_proj(x)  # [B, seq_len, 512]
                         desc_embed_proj = self.embed_proj(desc_embed)  # [B, 1, 512]
-                        x_proj = torch.cat((x_proj, desc_embed_proj), dim=1)  # [B, seq_len+1, 512]
+                        x = torch.cat((x, desc_embed_proj), dim=1)  # [B, seq_len+1, 512]
 
                         if e_prompt_counter > 0 and last_e_prompt is not None:
                             ne_prompt = e_prompt + last_e_prompt
@@ -263,22 +284,28 @@ class MomentTransformerL(nn.Module):
                         ne_prompt = ne_prompt.reshape(ne_prompt.shape[0], -1, ne_prompt.shape[-1])
                         ne_prompt = self.prompt_proj(ne_prompt)  # [B, prompt_len, 512]
 
-                        x_out = block(x_proj, prompt=ne_prompt)[0]
-
-                        # Proyectar de vuelta a 768D
-                        x = self.back_proj(x_out)
+                        x = block(x, prompt=ne_prompt)[0]
                         # Quitar el desc_embed que añadimos
                         x = x[:, :-1, :]
 
                     else:
-                        x = torch.cat((x, desc_embed), dim=1)
-                        prompt = e_prompt[e_prompt_counter]
+                        # Proyectar desc_embed a 512D
+                        desc_embed_proj = self.embed_proj(desc_embed)  # [B, 1, 512]
+                        x = torch.cat((x, desc_embed_proj), dim=1)
+
+                        # Proyectar prompt a 512D
+                        prompt = e_prompt[e_prompt_counter]  # está en 768D
+                        prompt = self.embed_proj(prompt)  # -> 512D
+
                         x = torch.cat([prompt, x], dim=1)
                         x = block(x)[0]
 
                     last_e_prompt = e_prompt
                 else:
                     x = block(x)[0]
+
+            # Proyectar de vuelta a 768D al final
+            x = self.back_proj(x)
         else:
             out = self.backbone.forward(task_name="classification", x_enc=x)
             if out.logits is not None:
@@ -291,6 +318,7 @@ class MomentTransformerL(nn.Module):
         res['x'] = x
 
         return res
+
     
     def forward_head(self, res, device, pre_logits=False):
         x = res["x"]
