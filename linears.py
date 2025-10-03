@@ -11,7 +11,6 @@ from timm.models.layers import Mlp
 from copy import deepcopy
 
 class SimpleContinualLinear(nn.Module):
-
     def __init__(self, embed_dim, nb_classes, feat_expand=False, with_norm=True):
         super().__init__()
 
@@ -33,9 +32,9 @@ class SimpleContinualLinear(nn.Module):
         self.heads = nn.ModuleList(heads)
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                trunc_normal_(m.weight, std=.02) 
+                trunc_normal_(m.weight, std=.02)
                 if m.bias is not None:
-                    nn.init.constant_(m.bias, 0) 
+                    nn.init.constant_(m.bias, 0)
                     # nn.init.uniform_(m.bias, -1, 1)
 
 
@@ -47,12 +46,10 @@ class SimpleContinualLinear(nn.Module):
 
 
     def update(self, nb_classes, freeze_old=True):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         single_head = []
         if self.with_norm:
-            single_head.append(nn.LayerNorm(self.embed_dim).to(device))
-        _fc = nn.Linear(self.embed_dim, nb_classes, bias=True).to(device)
+            single_head.append(nn.LayerNorm(self.embed_dim).cuda())
+        _fc = nn.Linear(self.embed_dim, nb_classes, bias=True).cuda()
         # _fc = SingleTaskHead(self.embed_dim, nb_classes).cuda()
         # _fc = nn.Linear(self.embed_dim, nb_classes, bias=False).cuda()
         
