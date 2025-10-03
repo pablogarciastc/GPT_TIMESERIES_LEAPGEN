@@ -149,7 +149,7 @@ def get_args_parser(parser):
     # -------------------
     parser.add_argument(
         '--freeze',
-        default=[],
+        default=['backbone.encoder', 'backbone.embeddings'],
         nargs='*',
         type=list,
         help='Freeze part of MOMENT backbone'
