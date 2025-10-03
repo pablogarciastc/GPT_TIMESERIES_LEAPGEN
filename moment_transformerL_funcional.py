@@ -289,6 +289,8 @@ class MomentTransformerL(nn.Module):
                     last_e_prompt = e_prompt
                 else:
                     x = block(x)[0]
+            x = self.back_proj(x)
+
         else:
             out = self.backbone.forward(task_name="classification", x_enc=x)
             if out.logits is not None:
@@ -297,7 +299,6 @@ class MomentTransformerL(nn.Module):
                 x = out.reconstruction
             res = dict()
 
-        x = self.back_proj(x)
         x = self.final_norm(x)
         res['x'] = x
 
