@@ -165,73 +165,64 @@ class MomentTransformerL(nn.Module):
 
         res = dict()
 
-        is_projected = False
+        if self.use_e_prompt or self.use_g_prompt:
+            prompt_mask = None
+            e_prompt_counter = -1
+            last_e_prompt = None
 
+            for i, block in enumerate(self.backbone.encoder.block):
+                if i in self.e_prompt_layer_idx:
+                    e_prompt_counter += 1
 
-        if self.grad_checkpointing and not torch.jit.is_scripting():
-            x = checkpoint_seq(self.backbone.encoder.block, x)
-        else:
-            ## FIXME MUst be use_e_prompt too?
-            if self.use_g_prompt:
-                if self.use_prompt_mask and train:
-                    start = task_id * self.e_prompt.top_k
-                    end = (task_id + 1) * self.e_prompt.top_k
-                    single_prompt_mask = torch.arange(start, end).to(x.device)
-                    prompt_mask = single_prompt_mask.unsqueeze(0).expand(x.shape[0], -1)
-                    if end > self.e_prompt.pool_size:
-                        prompt_mask = None
-                else:
-                    prompt_mask = None
+                    # Get cls_features for prompt selection
+                    cls_features = x[:, 0] if x.dim() == 3 else None
 
-                g_prompt_counter = -1
-                e_prompt_counter = -1
-                last_e_prompt = None
+                    res = self.e_prompt(
+                        x,
+                        y=None,  # No labels during inference
+                        task_id=task_id,
+                        prompt_mask=prompt_mask,
+                        layer_num=e_prompt_counter,
+                        cls_features=cls_features
+                    )
 
-                for i, block in enumerate(self.backbone.encoder.block):
-                    if i in self.g_prompt_layer_idx:
-                        if self.use_prefix_tune_for_g_prompt:
-                            e_prompt_counter += 1
-                            idx = torch.tensor([g_prompt_counter] * x.shape[0]).to(x.device)
-                            g_prompt = self.g_prompt[idx]
+                    e_prompt = res['batched_prompt']
+
+                    if self.use_prefix_tune_for_e_prompt:
+                        # Prefix tuning mode
+                        if e_prompt_counter > 0 and last_e_prompt is not None:
+                            ne_prompt = e_prompt + last_e_prompt
                         else:
-                            g_prompt= None
-                        x = block(x, prompt=g_prompt)[0]
+                            ne_prompt = e_prompt
 
-                        e_prompt = res['batched_prompt']
-                        desc_embed = res['desc_embed'].unsqueeze(1)  # [B, 1, 768]
+                        # Reshape for prefix tuning: [B, dual, length, num_heads, head_dim]
+                        ne_prompt = ne_prompt.reshape(ne_prompt.shape[0], -1, ne_prompt.shape[-1])
 
-                    elif i in self.e_prompt_layer_idx:
-                        e_prompt_counter += 1
-                        res = self.e_prompt(x, task_id=task_id, prompt_mask=prompt_mask, layer_num=e_prompt_counter,
-                                            cls_features=x[:, 0])
-                        e_prompt = res['batched_prompt']
-
-                        if self.use_prefix_tune_for_e_prompt:
-                            if e_prompt_counter > 0:
-                                ne_prompt = e_prompt + last_e_prompt
-                            else:
-                                ne_prompt = e_prompt
-                            x = block(x, prompt=ne_prompt)[0]
-
-                        else:
-                            # Pommpt tunning, [B, top_k * e_prompt_length, embed_dim]
-                            prompt = e_prompt[e_prompt_counter]
-                            x = torch.cat([prompt, x], dim=1)
-                            x = block(x)[0]
-                        last_e_prompt = e_prompt
+                        x = block(x, prompt=ne_prompt)[0]
                     else:
+                        # Prompt pool mode - prepend prompts to sequence
+                        prompt = e_prompt[e_prompt_counter]
+                        x = torch.cat([prompt, x], dim=1)
                         x = block(x)[0]
 
+                    last_e_prompt = e_prompt
                 else:
-                    out = self.backbone.forward(task_name="classification", x_enc=x)
-                    x = out.logits
-                    res = dict()
+                    x = block(x)[0]
+        else:
+            # No prompting - just use backbone
+            out = self.backbone.forward(task_name="classification", x_enc=x)
+            if out.logits is not None:
+                x = out.logits
+            elif hasattr(out, 'reconstruction') and out.reconstruction is not None:
+                x = out.reconstruction
+            res = dict()
 
-            x = self.final_norm(x)
-            res['x'] = x
+        x = self.final_norm(x)
+        res['x'] = x
 
         return res
 
+    
     def forward_featuresA1(self, x, task_id=-1, train=True, y=None, prompt_mask=None, cls_features=None):
         if x.dim() == 2:
             x = x.view(x.size(0), self.backbone.seq_len, self.num_features)
