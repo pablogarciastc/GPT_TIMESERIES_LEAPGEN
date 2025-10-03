@@ -167,11 +167,9 @@ class MomentTransformerL(nn.Module):
 
         is_projected = False
 
-        self.use_e_prompt = False
 
-        print("grad_checkpointing: ", self.grad_checkpointing)
-        print("use_g_prompt: ", self.use_g_prompt)
-        print("use_e_prompt: ", self.use_e_prompt)
+        ### FIXME OJO CON ESTO ADHOC
+        self.use_e_prompt = False
 
         if self.grad_checkpointing and not torch.jit.is_scripting():
             x = checkpoint_seq(self.backbone.encoder.block, x)
@@ -295,6 +293,8 @@ class MomentTransformerL(nn.Module):
         else:
             x = self.backbone.forward(task_name="classification", x_enc=x)
             res = dict()
+
+        print("Forward A1 X: ", x)
         x = self.back_proj(x)
         x = self.final_norm(x)
         res['x'] = x
