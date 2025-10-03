@@ -245,8 +245,6 @@ class MomentTransformerL(nn.Module):
 
         is_projected = False
 
-        print(self.use_e_prompt)
-
         if self.use_e_prompt or self.use_g_prompt:
             prompt_mask = None
             g_prompt_counter = -1
