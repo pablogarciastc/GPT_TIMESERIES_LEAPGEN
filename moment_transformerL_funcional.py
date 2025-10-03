@@ -167,6 +167,10 @@ class MomentTransformerL(nn.Module):
 
         is_projected = False
 
+        print("grad_checkpointing: ", self.grad_checkpointing)
+        print("use_g_prompt: ", self.use_g_prompt)
+        print("use_e_prompt: ", self.use_e_prompt)
+
         if self.grad_checkpointing and not torch.jit.is_scripting():
             x = checkpoint_seq(self.backbone.encoder.block, x)
         else:
