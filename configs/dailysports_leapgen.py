@@ -124,9 +124,9 @@ def get_args_parser(parser):
     parser.add_argument('--embedding_key', default='cls', type=str)
     parser.add_argument('--predefined_key', default='', type=str)
     parser.add_argument('--pull_constraint', default=True)
-    parser.add_argument('--pull_constraint_coeff', default=1, type=float)
-    parser.add_argument('--pull_constraint_coeff2', default=1, type=float)
-    parser.add_argument('--intertask_coeff', default=1, type=float)
+    parser.add_argument('--pull_constraint_coeff', default=0.1, type=float)
+    parser.add_argument('--pull_constraint_coeff2', default=0.1, type=float)
+    parser.add_argument('--intertask_coeff', default=0.1, type=float)
     parser.add_argument('--k_mul', default=25.0, type=float)
     parser.add_argument('--same_key_value', default=False, type=bool)
     parser.add_argument('--dualopt', default=True, type=bool)
@@ -149,7 +149,7 @@ def get_args_parser(parser):
     # -------------------
     parser.add_argument(
         '--freeze',
-        default=['backbone.encoder', 'backbone.embeddings'],
+        default=[],
         nargs='*',
         type=list,
         help='Freeze part of MOMENT backbone'
