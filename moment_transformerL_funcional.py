@@ -222,7 +222,6 @@ class MomentTransformerL(nn.Module):
 
         return res
 
-
     def forward_featuresA1(self, x, task_id=-1, train=True, y=None, prompt_mask=None, cls_features=None):
         if x.dim() == 2:
             x = x.view(x.size(0), self.backbone.seq_len, self.num_features)
@@ -230,15 +229,12 @@ class MomentTransformerL(nn.Module):
             x = x.permute(0, 2, 1)
 
         x = x.float()
-        x = self.input_proj(x)
+        x = self.input_proj(x)  # num_features -> 768
 
         res = dict()
 
-        is_projected = False
-
         if self.use_e_prompt or self.use_g_prompt:
             prompt_mask = None
-            g_prompt_counter = -1
             e_prompt_counter = -1
             last_e_prompt = None
 
@@ -246,6 +242,7 @@ class MomentTransformerL(nn.Module):
                 if i in self.e_prompt_layer_idx:
                     e_prompt_counter += 1
 
+                    # Llamar a e_prompt con x en 768D
                     res = self.e_prompt(x, y, task_id=task_id, prompt_mask=prompt_mask, layer_num=e_prompt_counter,
                                         cls_features=cls_features)
 
@@ -253,13 +250,10 @@ class MomentTransformerL(nn.Module):
                     desc_embed = res['desc_embed'].unsqueeze(1)  # [B, 1, 768]
 
                     if self.use_prefix_tune_for_e_prompt:
-                        if not is_projected:
-                            x = self.embed_proj(x)  # [B, seq_len, 512]
-                            is_projected = True
-
+                        # Proyectar a 512D solo para el block
+                        x_proj = self.embed_proj(x)  # [B, seq_len, 512]
                         desc_embed_proj = self.embed_proj(desc_embed)  # [B, 1, 512]
-
-                        x = torch.cat((x, desc_embed_proj), dim=1)  # [B, seq_len+1, 512]
+                        x_proj = torch.cat((x_proj, desc_embed_proj), dim=1)  # [B, seq_len+1, 512]
 
                         if e_prompt_counter > 0 and last_e_prompt is not None:
                             ne_prompt = e_prompt + last_e_prompt
@@ -269,7 +263,12 @@ class MomentTransformerL(nn.Module):
                         ne_prompt = ne_prompt.reshape(ne_prompt.shape[0], -1, ne_prompt.shape[-1])
                         ne_prompt = self.prompt_proj(ne_prompt)  # [B, prompt_len, 512]
 
-                        x = block(x, prompt=ne_prompt)[0]
+                        x_out = block(x_proj, prompt=ne_prompt)[0]
+
+                        # Proyectar de vuelta a 768D
+                        x = self.back_proj(x_out)
+                        # Quitar el desc_embed que añadimos
+                        x = x[:, :-1, :]
 
                     else:
                         x = torch.cat((x, desc_embed), dim=1)
@@ -280,8 +279,6 @@ class MomentTransformerL(nn.Module):
                     last_e_prompt = e_prompt
                 else:
                     x = block(x)[0]
-            x = self.back_proj(x)
-
         else:
             out = self.backbone.forward(task_name="classification", x_enc=x)
             if out.logits is not None:
@@ -294,7 +291,7 @@ class MomentTransformerL(nn.Module):
         res['x'] = x
 
         return res
-
+    
     def forward_head(self, res, device, pre_logits=False):
         x = res["x"]
 
