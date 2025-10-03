@@ -168,13 +168,11 @@ class MomentTransformerL(nn.Module):
         is_projected = False
 
 
-        ### FIXME OJO CON ESTO ADHOC
-        self.use_e_prompt = False
-
         if self.grad_checkpointing and not torch.jit.is_scripting():
             x = checkpoint_seq(self.backbone.encoder.block, x)
         else:
-            if self.use_e_prompt or self.use_g_prompt:
+            ## FIXME MUst be use_e_prompt too?
+            if self.use_g_prompt:
                 if self.use_prompt_mask and train:
                     start = task_id * self.e_prompt.top_k
                     end = (task_id + 1) * self.e_prompt.top_k
