@@ -225,7 +225,8 @@ class MomentTransformerL(nn.Module):
                         x = block(x)[0]
 
                 else:
-                    x = self.backbone.forward(task_name="classification", x_enc=x)
+                    out = self.backbone.forward(task_name="classification", x_enc=x)
+                    x = out.logits
                     res = dict()
 
             x = self.final_norm(x)
@@ -294,7 +295,6 @@ class MomentTransformerL(nn.Module):
             x = self.backbone.forward(task_name="classification", x_enc=x)
             res = dict()
 
-        print("Forward A1 X: ", x)
         x = self.back_proj(x)
         x = self.final_norm(x)
         res['x'] = x
