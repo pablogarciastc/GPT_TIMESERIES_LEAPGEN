@@ -167,6 +167,8 @@ class MomentTransformerL(nn.Module):
 
         is_projected = False
 
+        self.use_e_prompt = False
+
         print("grad_checkpointing: ", self.grad_checkpointing)
         print("use_g_prompt: ", self.use_g_prompt)
         print("use_e_prompt: ", self.use_e_prompt)
