@@ -109,7 +109,7 @@ def get_args_parser(parser):
     # E-Prompt pool parameters
     # -------------------
     parser.add_argument('--prompt_pool', default=True, type=bool)
-    parser.add_argument('--size', default=45, type=int)
+    parser.add_argument('--size', default=10, type=int)
     parser.add_argument('--length', default=20, type=int)
     parser.add_argument('--top_k', default=1, type=int)
     parser.add_argument('--top_k_l', default=3, type=int)
@@ -124,9 +124,9 @@ def get_args_parser(parser):
     parser.add_argument('--embedding_key', default='cls', type=str)
     parser.add_argument('--predefined_key', default='', type=str)
     parser.add_argument('--pull_constraint', default=True)
-    parser.add_argument('--pull_constraint_coeff', default=0.1, type=float)
-    parser.add_argument('--pull_constraint_coeff2', default=0.1, type=float)
-    parser.add_argument('--intertask_coeff', default=0.1, type=float)
+    parser.add_argument('--pull_constraint_coeff', default=1, type=float)
+    parser.add_argument('--pull_constraint_coeff2', default=1, type=float)
+    parser.add_argument('--intertask_coeff', default=1, type=float)
     parser.add_argument('--k_mul', default=25.0, type=float)
     parser.add_argument('--same_key_value', default=False, type=bool)
     parser.add_argument('--dualopt', default=True, type=bool)
