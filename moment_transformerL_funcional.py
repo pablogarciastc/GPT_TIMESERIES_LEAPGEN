@@ -293,7 +293,10 @@ class MomentTransformerL(nn.Module):
                     x = block(x)[0]
         else:
             out = self.backbone.forward(task_name="classification", x_enc=x)
-            x = out.logits
+            if out.logits is not None:
+                x = out.logits
+            elif out.reconstruction is not None:
+                x = out.reconstruction
             res = dict()
 
         x = self.back_proj(x)
