@@ -217,7 +217,9 @@ def get_descriptors_embedding1(class_mask, task_id, args=None):
         # path = os.getcwd()+"/descriptors/descriptors_"+dataset_name+"_gpt4q.json"
     # path = os.getcwd()+"/descriptors/descriptors_"+dataset_name+"_gpt4p2.json"
     if "DailySports" in args.dataset:
-        path = os.getcwd()+"/descriptors/descriptors_"+dataset_name+".json"
+        path = os.getcwd()+"/descriptors/per_channel_"+dataset_name+".json"
+
+        #path = os.getcwd()+"/descriptors/descriptors_"+dataset_name+".json"
 
 
     if not os.path.exists(path):

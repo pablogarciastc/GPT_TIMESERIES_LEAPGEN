@@ -1,0 +1,200 @@
+{
+    "Sitting": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch37, ch28, ch0",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~5.0 timesteps) in 71% of channels",
+        "highly heterogeneous channel behavior",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Standing": [
+        "moderate overall activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch27, ch36, ch0",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~8.0 timesteps) in 84% of channels",
+        "moderate heterogeneity across channels",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Lying on back": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch2, ch28, ch37",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~3.0 timesteps) in 76% of channels",
+        "highly heterogeneous channel behavior",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Lying on right side": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch29, ch38, ch1",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~7.8 timesteps) in 67% of channels",
+        "highly heterogeneous channel behavior",
+        "frequent peaks/rapid changes",
+        "no clear directional trend"
+    ],
+    "Ascending stairs": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch27, ch36, ch0",
+        "moderate inter-channel coordination",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~3.1 timesteps) in 100% of channels",
+        "highly heterogeneous channel behavior",
+        "smooth/gradual changes",
+        "no clear directional trend"
+    ],
+    "Descending stairs": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch27, ch36, ch18",
+        "moderate inter-channel coordination",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~4.1 timesteps) in 91% of channels",
+        "highly heterogeneous channel behavior",
+        "smooth/gradual changes",
+        "no clear directional trend"
+    ],
+    "Standing in elevator still": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch36, ch27, ch0",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~3.3 timesteps) in 96% of channels",
+        "moderate heterogeneity across channels",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Moving around in elevator": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch27, ch36, ch0",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~4.5 timesteps) in 93% of channels",
+        "moderate heterogeneity across channels",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Walking in parking lot": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch36, ch27, ch0",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~12.6 timesteps) in 93% of channels",
+        "highly heterogeneous channel behavior",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Walking on treadmill flat": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch36, ch27, ch0",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~15.0 timesteps) in 91% of channels",
+        "highly heterogeneous channel behavior",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Walking on treadmill inclined": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch36, ch27, ch0",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~19.1 timesteps) in 96% of channels",
+        "highly heterogeneous channel behavior",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Running on treadmill": [
+        "moderate overall activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch36, ch27, ch10",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~18.1 timesteps) in 89% of channels",
+        "highly heterogeneous channel behavior",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Exercising on stepper": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch27, ch36, ch0",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~6.2 timesteps) in 80% of channels",
+        "moderate heterogeneity across channels",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Exercising on cross trainer": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch27, ch36, ch10",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~12.1 timesteps) in 93% of channels",
+        "highly heterogeneous channel behavior",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Cycling horizontal": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch37, ch28, ch0",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~6.9 timesteps) in 93% of channels",
+        "highly heterogeneous channel behavior",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Cycling vertical": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch37, ch28, ch20",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~5.4 timesteps) in 91% of channels",
+        "highly heterogeneous channel behavior",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Rowing": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch36, ch27, ch0",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~8.2 timesteps) in 84% of channels",
+        "highly heterogeneous channel behavior",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ],
+    "Jumping": [
+        "low activity level",
+        "selective channel activation (22/45)",
+        "primary channels: ch27, ch36, ch0",
+        "independent channel dynamics",
+        "stable/consistent temporal pattern",
+        "rhythmic pattern (period ~6.9 timesteps) in 78% of channels",
+        "highly heterogeneous channel behavior",
+        "moderate peak frequency",
+        "no clear directional trend"
+    ]
+}
