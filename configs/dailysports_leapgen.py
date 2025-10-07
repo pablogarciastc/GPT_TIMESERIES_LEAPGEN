@@ -94,7 +94,7 @@ def get_args_parser(parser):
     # -------------------
     # E-Prompt parameters
     # -------------------
-    parser.add_argument('--use_e_prompt', default=False, type=bool, help='If using the E-Prompt')
+    parser.add_argument('--use_e_prompt', default=True, type=bool, help='If using the E-Prompt')
     parser.add_argument('--e_prompt_layer_idx', default=[0, 2, 4, 6], type=int, nargs="+",
                         help='The layer index of the E-Prompt')
     parser.add_argument('--use_prefix_tune_for_e_prompt', default=True, type=bool,
