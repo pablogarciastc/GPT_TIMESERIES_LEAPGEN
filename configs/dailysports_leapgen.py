@@ -110,7 +110,7 @@ def get_args_parser(parser):
     # -------------------
     parser.add_argument('--prompt_pool', default=True, type=bool)
     parser.add_argument('--size', default=45, type=int)
-    parser.add_argument('--length', default=10, type=int)
+    parser.add_argument('--length', default=50, type=int)
     parser.add_argument('--top_k', default=1, type=int)
     parser.add_argument('--top_k_l', default=3, type=int)
     parser.add_argument('--initializer', default='uniform', type=str)
@@ -133,8 +133,8 @@ def get_args_parser(parser):
     parser.add_argument('--eval_frequency', default=5, type=int)
     parser.add_argument('--save_best_model', default=True, type=bool)
     parser.add_argument('--patience', default=10, type=int)
-    parser.add_argument('--replay_loss_weight', default=0.03, type=float)
-    parser.add_argument('--prompt_l2_weight', default=0.1, type=float)
+    parser.add_argument('--replay_loss_weight', default=0.3, type=float)
+    parser.add_argument('--prompt_l2_weight', default=0.01, type=float)
     parser.add_argument('--label_smoothing', default=0.05, type=float)
     # -------------------
     # Attribute generator / prompt parameters
