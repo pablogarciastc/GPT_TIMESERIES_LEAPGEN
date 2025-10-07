@@ -109,8 +109,8 @@ def get_args_parser(parser):
     # E-Prompt pool parameters
     # -------------------
     parser.add_argument('--prompt_pool', default=True, type=bool)
-    parser.add_argument('--size', default=4500, type=int)
-    parser.add_argument('--length', default=20, type=int)
+    parser.add_argument('--size', default=45, type=int)
+    parser.add_argument('--length', default=2000, type=int)
     parser.add_argument('--top_k', default=1, type=int)
     parser.add_argument('--top_k_l', default=3, type=int)
     parser.add_argument('--initializer', default='uniform', type=str)
