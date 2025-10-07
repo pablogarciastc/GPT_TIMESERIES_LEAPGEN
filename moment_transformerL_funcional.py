@@ -360,18 +360,15 @@ class MomentTransformerL(nn.Module):
 
         return res
 
-    
     def forward_headA1(self, res, task_id, device, pre_logits=False):
         x = res["x"]
 
-        # Handle different head types (similar to VisionTransformerL logic)
+        # Handle different head types
         if self.head_type == 'token':
             if self.prompt_pool:
-                # Skip prompt tokens if using prompt pool
                 x = x[:, self.total_prompt_len:] if self.total_prompt_len > 0 else x
-            # For sequence data, we might want to use mean pooling or just first token
             if x.dim() == 3:
-                x = x.mean(dim=1)  # Global average pooling
+                x = x.mean(dim=1)
         elif self.head_type == 'gap':
             if x.dim() == 3:
                 x = x.mean(dim=1)
@@ -384,7 +381,18 @@ class MomentTransformerL(nn.Module):
                 x = x.mean(dim=1)
 
         res["pre_logits"] = x
+
+        # Obtener max_t de res si existe, sino calcularlo desde task_id
         max_t = res.get('max_t', None)
+        if max_t is None:
+            # Si no viene de e_prompt, calcularlo manualmente
+            if task_id >= 0:
+                max_t = task_id + 1
+            else:
+                # Durante inferencia sin task_id específico, usar todas las tareas
+                max_t = self.num_tasks
+
+        print(f"DEBUG: task_id={task_id}, max_t={max_t}, has_max_t_in_res={'max_t' in res}")
 
         # Use forward2 which returns dictionary with 'logits' key
         out = self.head.forward2(x, max_t)
