@@ -311,6 +311,7 @@ class MomentTransformerL(nn.Module):
         else:
             print("HIII")
             out = self.backbone.forward(task_name="classification", x_enc=x)
+            print("OUT: ", out)
             if out.logits is not None:
                 x = out.logits
             elif out.reconstruction is not None:
