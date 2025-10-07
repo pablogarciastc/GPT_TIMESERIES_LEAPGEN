@@ -217,8 +217,8 @@ def get_descriptors_embedding1(class_mask, task_id, args=None):
         # path = os.getcwd()+"/descriptors/descriptors_"+dataset_name+"_gpt4q.json"
     # path = os.getcwd()+"/descriptors/descriptors_"+dataset_name+"_gpt4p2.json"
     if "DailySports" in args.dataset:
-        path = os.getcwd()+"/descriptors/descriptors_"+dataset_name+".json"
-        print("Path: ", path)
+        path = os.getcwd()+"/descriptors/per_channel_"+dataset_name+".json"
+
         #path = os.getcwd()+"/descriptors/descriptors_"+dataset_name+".json"
 
 
@@ -247,8 +247,8 @@ def get_descriptors_embedding1(class_mask, task_id, args=None):
 
 
     for item in class_mask[task_id]:
-        # attribs = list(desc.items())[item][1]
-        attribs = list(desc.items())[item][0]
+
+        attribs = list(desc.items())[item][1]
         att = attribs[0]
         for i in range(1,len(attribs)):
             att = att + "," +attribs[i]
@@ -259,13 +259,13 @@ def get_descriptors_embedding1(class_mask, task_id, args=None):
         # print("class : " + str(item))
         # print(attribs)
 
-         
+
         # encodings = torch.tensor(model.encode(attribs, convert_to_tensor=False))
         encodings = model.encode(att, convert_to_tensor=True)
         # print(encodings.shape)
         desc_emb.append(encodings)
         # desc_emb.unsqueeze(1)
-        
+
     return desc_emb
 
 
