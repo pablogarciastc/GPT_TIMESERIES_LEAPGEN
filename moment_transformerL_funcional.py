@@ -323,18 +323,15 @@ class MomentTransformerL(nn.Module):
 
         return res
 
-    
     def forward_head(self, res, device, pre_logits=False):
         x = res["x"]
 
-        # Handle different head types (similar to VisionTransformerL logic)
+        # Handle different head types
         if self.head_type == 'token':
             if self.prompt_pool:
-                # Skip prompt tokens if using prompt pool
                 x = x[:, self.total_prompt_len:] if self.total_prompt_len > 0 else x
-            # For sequence data, we might want to use mean pooling or just first token
             if x.dim() == 3:
-                x = x.mean(dim=1)  # Global average pooling
+                x = x.mean(dim=1)
         elif self.head_type == 'gap':
             if x.dim() == 3:
                 x = x.mean(dim=1)
@@ -348,16 +345,22 @@ class MomentTransformerL(nn.Module):
 
         res["pre_logits"] = x
 
-        # Apply classification head - direct call returns logits tensor
-        out = self.head(x)
+        # Llamar al head con forward simple (devuelve tensor)
+        logits = self.head(x)
 
+        # Si use_multihead, logits ya es el tensor correcto
+        # Si no, necesitamos extraer solo las clases relevantes
         if self.use_multihead:
-            res['logits'] = out['logits']
+            # Con multihead, el head devuelve todas las clases de todas las tareas
+            # Para original_model (feature extraction), devolver todo está bien
+            res['logits'] = logits
         else:
-            res['logits'] = out[:, :self.num_classes]
-            res['task_logits'] = out[:, self.num_classes:]
+            res['logits'] = logits[:, :self.num_classes]
+            res['task_logits'] = logits[:, self.num_classes:]
+
         return res
 
+    
     def forward_headA1(self, res, task_id, device, pre_logits=False):
         x = res["x"]
 
@@ -395,7 +398,7 @@ class MomentTransformerL(nn.Module):
 
     def forward(self, x, task_id=-1, train=False, cls_features=None):
         res = self.forward_features(x, task_id=task_id, train=train)
-        res = self.forward_headA1(res, task_id=task_id, device=x.device)
+        res = self.forward_head(res, device=x.device)
         return res
 
     def forwardA1(self, x, target=None, task_id=-1, cls_features=None, train=True):
