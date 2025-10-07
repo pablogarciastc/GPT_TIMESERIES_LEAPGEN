@@ -170,6 +170,8 @@ class MomentTransformerL(nn.Module):
 
         if self.grad_checkpointing and not torch.jit.is_scripting():
             x = checkpoint_seq(self.backbone.encoder.block, x)
+            print("llego aqui0")
+
         else:
             if self.use_g_prompt or self.use_e_prompt:
                 print("llego aqui")
