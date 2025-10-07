@@ -58,8 +58,6 @@ class MomentTransformerL(nn.Module):
 
         # === Backbone ===
         self.backbone = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-small")
-
-        print(f"MOMENT has {len(self.backbone.encoder.block)} encoder layers")
         self._disable_gc()
         self.input_proj = nn.Linear(num_features, self.embed_dim)
         self.back_proj = nn.Linear(512, 768)
@@ -309,9 +307,7 @@ class MomentTransformerL(nn.Module):
             # Proyectar de vuelta a 768D al final
             x = self.back_proj(x)
         else:
-            print("HIII")
             out = self.backbone.forward(task_name="classification", x_enc=x)
-            print("OUT: ", out)
             if out.logits is not None:
                 x = out.logits
             elif out.reconstruction is not None:
@@ -323,15 +319,18 @@ class MomentTransformerL(nn.Module):
 
         return res
 
+
     def forward_head(self, res, device, pre_logits=False):
         x = res["x"]
 
-        # Handle different head types
+        # Handle different head types (similar to VisionTransformerL logic)
         if self.head_type == 'token':
             if self.prompt_pool:
+                # Skip prompt tokens if using prompt pool
                 x = x[:, self.total_prompt_len:] if self.total_prompt_len > 0 else x
+            # For sequence data, we might want to use mean pooling or just first token
             if x.dim() == 3:
-                x = x.mean(dim=1)
+                x = x.mean(dim=1)  # Global average pooling
         elif self.head_type == 'gap':
             if x.dim() == 3:
                 x = x.mean(dim=1)
@@ -345,30 +344,27 @@ class MomentTransformerL(nn.Module):
 
         res["pre_logits"] = x
 
-        # Llamar al head con forward simple (devuelve tensor)
-        logits = self.head(x)
+        # Apply classification head - direct call returns logits tensor
+        out = self.head(x)
 
-        # Si use_multihead, logits ya es el tensor correcto
-        # Si no, necesitamos extraer solo las clases relevantes
         if self.use_multihead:
-            # Con multihead, el head devuelve todas las clases de todas las tareas
-            # Para original_model (feature extraction), devolver todo está bien
-            res['logits'] = logits
+            res['logits'] = out['logits']
         else:
-            res['logits'] = logits[:, :self.num_classes]
-            res['task_logits'] = logits[:, self.num_classes:]
-
+            res['logits'] = out[:, :self.num_classes]
+            res['task_logits'] = out[:, self.num_classes:]
         return res
 
     def forward_headA1(self, res, task_id, device, pre_logits=False):
         x = res["x"]
 
-        # Handle different head types
+        # Handle different head types (similar to VisionTransformerL logic)
         if self.head_type == 'token':
             if self.prompt_pool:
+                # Skip prompt tokens if using prompt pool
                 x = x[:, self.total_prompt_len:] if self.total_prompt_len > 0 else x
+            # For sequence data, we might want to use mean pooling or just first token
             if x.dim() == 3:
-                x = x.mean(dim=1)
+                x = x.mean(dim=1)  # Global average pooling
         elif self.head_type == 'gap':
             if x.dim() == 3:
                 x = x.mean(dim=1)
@@ -381,18 +377,7 @@ class MomentTransformerL(nn.Module):
                 x = x.mean(dim=1)
 
         res["pre_logits"] = x
-
-        # Obtener max_t de res si existe, sino calcularlo desde task_id
         max_t = res.get('max_t', None)
-        if max_t is None:
-            # Si no viene de e_prompt, calcularlo manualmente
-            if task_id >= 0:
-                max_t = task_id + 1
-            else:
-                # Durante inferencia sin task_id específico, usar todas las tareas
-                max_t = self.num_tasks
-
-        print(f"DEBUG: task_id={task_id}, max_t={max_t}, has_max_t_in_res={'max_t' in res}")
 
         # Use forward2 which returns dictionary with 'logits' key
         out = self.head.forward2(x, max_t)

@@ -192,13 +192,14 @@ def train_one_epoch_with_aux(
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
         optimizer.step()
 
-        if args.dualopt and isinstance(loss2, torch.Tensor):
+        if args.dualopt:
             task_optimizer.zero_grad()
             loss2.backward()
             task_optimizer.step()
 
         if device.type == 'cuda':
             torch.cuda.synchronize()
+
 
         metric_logger.update(Loss=loss.item())
         metric_logger.update(Lr=optimizer.param_groups[0]["lr"])
