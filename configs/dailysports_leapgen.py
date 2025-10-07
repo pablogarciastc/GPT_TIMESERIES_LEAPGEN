@@ -110,7 +110,7 @@ def get_args_parser(parser):
     # -------------------
     parser.add_argument('--prompt_pool', default=True, type=bool)
     parser.add_argument('--size', default=45, type=int)
-    parser.add_argument('--length', default=200, type=int)
+    parser.add_argument('--length', default=10, type=int)
     parser.add_argument('--top_k', default=1, type=int)
     parser.add_argument('--top_k_l', default=3, type=int)
     parser.add_argument('--initializer', default='uniform', type=str)
