@@ -58,6 +58,8 @@ class MomentTransformerL(nn.Module):
 
         # === Backbone ===
         self.backbone = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-small")
+
+        print(f"MOMENT has {len(self.backbone.encoder.block)} encoder layers")
         self._disable_gc()
         self.input_proj = nn.Linear(num_features, self.embed_dim)
         self.back_proj = nn.Linear(512, 768)

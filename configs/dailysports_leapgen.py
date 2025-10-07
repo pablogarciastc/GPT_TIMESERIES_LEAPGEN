@@ -95,7 +95,7 @@ def get_args_parser(parser):
     # E-Prompt parameters
     # -------------------
     parser.add_argument('--use_e_prompt', default=True, type=bool, help='If using the E-Prompt')
-    parser.add_argument('--e_prompt_layer_idx', default=[0, 1, 2, 3, 4, 5, 6], type=int, nargs="+",
+    parser.add_argument('--e_prompt_layer_idx', default=[0, 1, 2, 3, 4, 5, 6,7], type=int, nargs="+",
                         help='The layer index of the E-Prompt')
     parser.add_argument('--use_prefix_tune_for_e_prompt', default=True, type=bool,
                         help='If using prefix tuning for E-Prompt')
@@ -124,9 +124,9 @@ def get_args_parser(parser):
     parser.add_argument('--embedding_key', default='cls', type=str)
     parser.add_argument('--predefined_key', default='', type=str)
     parser.add_argument('--pull_constraint', default=True)
-    parser.add_argument('--pull_constraint_coeff', default=1, type=float)
-    parser.add_argument('--pull_constraint_coeff2', default=1, type=float)
-    parser.add_argument('--intertask_coeff', default=1, type=float)
+    parser.add_argument('--pull_constraint_coeff', default=0.01, type=float)
+    parser.add_argument('--pull_constraint_coeff2', default=0.01, type=float)
+    parser.add_argument('--intertask_coeff', default=0.01, type=float)
     parser.add_argument('--k_mul', default=25.0, type=float)
     parser.add_argument('--same_key_value', default=False, type=bool)
     parser.add_argument('--dualopt', default=True, type=bool)
