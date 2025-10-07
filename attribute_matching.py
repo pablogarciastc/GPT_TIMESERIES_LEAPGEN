@@ -248,7 +248,7 @@ def get_descriptors_embedding1(class_mask, task_id, args=None):
 
     for item in class_mask[task_id]:
 
-        attribs = list(desc.items())[item][1]
+        attribs = list(desc.items())[item][0]
         att = attribs[0]
         for i in range(1,len(attribs)):
             att = att + "," +attribs[i]

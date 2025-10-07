@@ -200,7 +200,6 @@ def train_one_epoch_with_aux(
         if device.type == 'cuda':
             torch.cuda.synchronize()
 
-
         metric_logger.update(Loss=loss.item())
         metric_logger.update(Lr=optimizer.param_groups[0]["lr"])
         metric_logger.meters['Acc@1'].update(acc1.item(), n=inp.shape[0])
