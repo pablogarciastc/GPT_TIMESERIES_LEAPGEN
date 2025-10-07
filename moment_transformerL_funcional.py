@@ -309,6 +309,7 @@ class MomentTransformerL(nn.Module):
             # Proyectar de vuelta a 768D al final
             x = self.back_proj(x)
         else:
+            print("HIII")
             out = self.backbone.forward(task_name="classification", x_enc=x)
             if out.logits is not None:
                 x = out.logits
