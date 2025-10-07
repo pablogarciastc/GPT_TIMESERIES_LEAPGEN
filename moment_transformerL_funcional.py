@@ -272,8 +272,7 @@ class MomentTransformerL(nn.Module):
                     desc_embed = res['desc_embed'].unsqueeze(1)  # [B, 1, 768]
 
                     if self.use_prefix_tune_for_e_prompt:
-                        desc_embed_proj = self.embed_proj(desc_embed)  # [B, 1, 512]
-                        x = torch.cat((x, desc_embed_proj), dim=1)  # [B, seq_len+1, 512]
+                        x = torch.cat((x, desc_embed), dim=1)  # [B, seq_len+1, 512]
 
                         if e_prompt_counter > 0 and last_e_prompt is not None:
                             ne_prompt = e_prompt + last_e_prompt
@@ -289,13 +288,10 @@ class MomentTransformerL(nn.Module):
 
                     else:
                         # Proyectar desc_embed a 512D
-                        desc_embed_proj = self.embed_proj(desc_embed)  # [B, 1, 512]
-                        x = torch.cat((x, desc_embed_proj), dim=1)
+                        x = torch.cat((x, desc_embed), dim=1)
 
                         # Proyectar prompt a 512D
                         prompt = e_prompt[e_prompt_counter]  # está en 768D
-                        prompt = self.embed_proj(prompt)  # -> 512D
-
                         x = torch.cat([prompt, x], dim=1)
                         x = block(x)[0]
 

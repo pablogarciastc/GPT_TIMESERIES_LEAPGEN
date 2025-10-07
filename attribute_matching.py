@@ -230,7 +230,7 @@ def get_descriptors_embedding1(class_mask, task_id, args=None):
     desc = json.load(f)
 
     desc_emb = []
-    model = SentenceTransformer('whaleloops/phrase-bert')
+    model = SentenceTransformer('sentence-transformers/distiluse-base-multilingual-cased')
     # model = SentenceTransformer('whaleloops/phrase-bert',truncate_dim=64)
 
     if task_id == 0:
