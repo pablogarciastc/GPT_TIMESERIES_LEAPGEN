@@ -395,7 +395,7 @@ class MomentTransformerL(nn.Module):
 
     def forward(self, x, task_id=-1, train=False, cls_features=None):
         res = self.forward_features(x, task_id=task_id, train=train)
-        res = self.forward_head(res, device=x.device)
+        res = self.forward_headA1(res, task_id=task_id, device=x.device)
         return res
 
     def forwardA1(self, x, target=None, task_id=-1, cls_features=None, train=True):
