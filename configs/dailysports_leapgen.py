@@ -85,7 +85,7 @@ def get_args_parser(parser):
     # -------------------
     # G-Prompt parameters
     # -------------------
-    parser.add_argument('--use_g_prompt', default=False, type=bool, help='If using G-Prompt')
+    parser.add_argument('--use_g_prompt', default=True, type=bool, help='If using G-Prompt')
     parser.add_argument('--g_prompt_length', default=4, type=int, help='Length of G-Prompt')
     parser.add_argument('--g_prompt_layer_idx', default=[0,2,4], type=int, nargs="+", help='The layer index of the G-Prompt')
     parser.add_argument('--use_prefix_tune_for_g_prompt', default=True, type=bool,
@@ -110,7 +110,7 @@ def get_args_parser(parser):
     # -------------------
     parser.add_argument('--prompt_pool', default=True, type=bool)
     parser.add_argument('--size', default=45, type=int)
-    parser.add_argument('--length', default=35, type=int)
+    parser.add_argument('--length', default=20, type=int)
     parser.add_argument('--top_k', default=1, type=int)
     parser.add_argument('--top_k_l', default=3, type=int)
     parser.add_argument('--initializer', default='uniform', type=str)
