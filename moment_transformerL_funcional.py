@@ -170,14 +170,9 @@ class MomentTransformerL(nn.Module):
 
         if self.grad_checkpointing and not torch.jit.is_scripting():
             x = checkpoint_seq(self.backbone.encoder.block, x)
-            print("llego aqui0")
-
         else:
             if self.use_g_prompt or self.use_e_prompt:
-                print("llego aqui")
                 if self.use_prompt_mask and train:
-                    print("llego aqui2")
-
                     start = task_id * self.e_prompt.top_k
                     end = (task_id + 1) * self.e_prompt.top_k
                     single_prompt_mask = torch.arange(start, end).to(x.device)
@@ -192,8 +187,6 @@ class MomentTransformerL(nn.Module):
                 last_e_prompt = None
 
                 for i, block in enumerate(self.backbone.encoder.block):
-                    print("llego aqui3")
-
                     if i in self.g_prompt_layer_idx:
                         if self.use_prefix_tune_for_g_prompt:
                             e_prompt_counter += 1
