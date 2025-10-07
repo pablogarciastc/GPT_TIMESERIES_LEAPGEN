@@ -134,7 +134,7 @@ def get_args_parser(parser):
     parser.add_argument('--save_best_model', default=True, type=bool)
     parser.add_argument('--patience', default=10, type=int)
     parser.add_argument('--replay_loss_weight', default=0.03, type=float)
-    parser.add_argument('--prompt_l2_weight', default=0.01, type=float)
+    parser.add_argument('--prompt_l2_weight', default=0.1, type=float)
     parser.add_argument('--label_smoothing', default=0.05, type=float)
     # -------------------
     # Attribute generator / prompt parameters
