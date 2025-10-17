@@ -434,10 +434,6 @@ def train_and_evaluate(model, original_model, criterion, data_loader, lr_schedul
         # --- actualizar la cabeza de clasificación para la nueva tarea
         if task_id > 0:
             model.head.update(len(class_mask[task_id]))
-
-        if task_id>0:
-            model.head.update(len(class_mask[task_id]))
-            # model.add_new_head()
         print(model.head)
 
         not_n_params = []
@@ -506,6 +502,7 @@ def train_and_evaluate(model, original_model, criterion, data_loader, lr_schedul
 
         # --- entrenamiento
         for epoch in range(args.epochs):
+            logging.info('Training for task {} epoch {}/{}'.format(task_id, epoch, args.epochs))
             train_stats = train_one_epoch_with_aux(
                 model=model, original_model=original_model, criterion=criterion,
                 data_loader=data_loader[task_id]["train"], aux_desc_emb=aux_desc_emb,
